@@ -63,7 +63,11 @@ jobs:
           done
 
       - name: Build workbook
+        # build_workbook.py reads ./candidates.csv, which the rung loop above
+        # deliberately does not write. Generate the shipping rung at the
+        # default path first.
         run: |
+          python expand_catalog.py --level L0
           python build_workbook.py
 
       - name: Upload catalog for review
