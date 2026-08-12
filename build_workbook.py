@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """build_workbook.py — assemble feature_catalog.xlsx from the registries."""
-import csv, yaml
+import csv
+import os
 from pathlib import Path
+
+import yaml
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.comments import Comment
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+
 from nongrid_features import NONGRID
 
-SPEC = yaml.safe_load(Path("feature_space.yaml").read_text())
-OUT = "/mnt/user-data/outputs/feature_catalog.xlsx"
+ROOT = Path(__file__).resolve().parent
+SPEC = yaml.safe_load((ROOT / "feature_space.yaml").read_text())
+# Output path is overridable so CI and local runs do not fight over a location.
+OUT = os.environ.get("FEATURE_CATALOG_OUT", str(ROOT / "feature_catalog.xlsx"))
+CANDIDATES = os.environ.get("FEATURE_CANDIDATES", str(ROOT / "candidates.csv"))
 
 F = "Arial"
 H_FILL = PatternFill("solid", fgColor="1F3864")
@@ -107,7 +113,14 @@ for k, v in readme:
     r += 1
 
 # ══════════════════════════════════════════════════════ GRID CATALOG
-rows = list(csv.reader(open("candidates.csv")))
+if not os.path.exists(CANDIDATES):
+    raise SystemExit(
+        f"{CANDIDATES} not found.\n"
+        "It is a build artifact, not source. Generate it first:\n"
+        "    make catalog            # or: python expand_catalog.py --level L0\n"
+        "Or build both in one step:  make workbook"
+    )
+rows = list(csv.reader(open(CANDIDATES)))
 hdr, data = rows[0], rows[1:]
 ws = sheet("Grid Catalog", "Stage-A grid candidates",
            "entity x measure x aggregation x window, filter=none, transform=raw. Screen these first; expand transforms and filters only "
@@ -181,7 +194,7 @@ r = block(ws, r, "TRANSFORMS — generalizes 'difference/ratio at different lags
           [(t["id"], t["name"], t["formula"], t.get("priority")) for t in SPEC["transforms"]], wrapc=(3,))
 r = block(ws, r, "LABELS — model more than one; they have near-disjoint predictors",
           ["id", "definition", "maturity_days_90pct", "notes"],
-          [(l["id"], l["definition"], l["maturity_days_90pct"], l["notes"]) for l in SPEC["labels"]], wrapc=(2, 4))
+          [(x["id"], x["definition"], x["maturity_days_90pct"], x["notes"]) for x in SPEC["labels"]], wrapc=(2, 4))
 widths(ws, {"A": 22, "B": 40, "C": 46, "D": 18, "E": 22, "F": 10})
 
 # ══════════════════════════════════════════════════ RESOLUTION LADDER

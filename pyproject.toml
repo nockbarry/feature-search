@@ -1,0 +1,36 @@
+[project]
+name = "feature-search"
+version = "0.2.0"
+description = "Generative feature-space search for a chargeback fraud classification model"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+# Flat layout with several top-level modules: setuptools auto-discovery refuses
+# to guess, so name them. Adding a new top-level module means adding it here.
+[tool.setuptools]
+py-modules = ["expand_catalog", "nongrid_features", "build_workbook", "pit_reference"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E701/E702: build_workbook.py and expand_catalog.py deliberately use compact
+# paired statements (set value; set style). Readable in a generator, noisy to split.
+# E731: short lambdas used as local formatters.
+ignore = ["E501", "E701", "E702", "E731"]

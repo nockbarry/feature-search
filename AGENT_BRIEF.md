@@ -241,10 +241,20 @@ Step 9 is not optional and is routinely skipped. Global importance is dominated 
 | `nongrid_features.py` | The 143 seeded non-grid features. Extend it. |
 | `build_workbook.py` | Regenerates `feature_catalog.xlsx` from the above. |
 | `pit_aggregate_template.sql` | Reference implementation of the two-clock rule, shrinkage, censoring correction, and the parity harness. |
-| `feature_catalog.xlsx` | The work queue. Blue cells are yours to fill. |
+| `pit_reference.py` | The same logic in dependency-free Python — an executable spec CI can exercise. Also holds `naive_aggregate_LEAKY`, the bug kept deliberately so the suite can prove the correct path differs from it. |
+| `feature_catalog.xlsx` | The work queue. Blue cells are yours to fill. **Build artifact** — gitignored, CI fails if committed. |
+| `docs/split_protocol.md` | Purge and embargo under label maturity. Read before cutting any split. |
+| `docs/null_semantics.md` | Null encoding, missingness indicators, feature-outage fail-open/fail-closed policy. |
+| `docs/label_definition.md` | Reason-code mapping and dispute-lifecycle edge cases. |
+| `tests/` | Compatibility and naming contracts, determinism, and the PIT leakage fixtures. |
 
 Regenerate the workbook any time the registries change:
 
 ```bash
-python expand_catalog.py --level L0 && python build_workbook.py
+make workbook            # or: python expand_catalog.py --level L0 && python build_workbook.py
+make check               # tests + lint, exactly what CI runs
 ```
+
+### Not yet written
+
+Deliberately deferred, so nobody assumes they exist: reject-inference method (the brief says *use* release-program labels, not *how* to weight them), cost-sensitive objective and class weighting, calibration protocol, the minimum release rate that keeps the policy feedback loop broken, per-segment performance floors, and the governance set — model card, fairness protocol, adverse-action reason codes, retraining triggers, red-team plan, runbooks. Each is a decision with materially different variants; picking one silently is worse than the gap.

@@ -1,0 +1,15 @@
+# Build artifacts — regenerate with `make catalog workbook`.
+# Committing these guarantees drift between feature_space.yaml and the artifact.
+candidates.csv
+feature_catalog.xlsx
+survivors.txt
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+~$*.xlsx

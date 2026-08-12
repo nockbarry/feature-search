@@ -13,7 +13,10 @@ The full slot product is astronomically large; this applies COMPATIBILITY rules
 lands in the catalog is buildable. Tier counts for the ungated space are reported
 so nobody mistakes the materialized set for the whole space.
 """
-import argparse, csv, itertools, sys
+import argparse
+import csv
+import itertools
+import sys
 from pathlib import Path
 
 try:

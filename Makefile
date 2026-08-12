@@ -1,0 +1,44 @@
+# feature-search — regenerate everything from feature_space.yaml
+#
+# The YAML is the source of truth. candidates.csv and feature_catalog.xlsx are
+# BUILD ARTIFACTS: never hand-edit them, never commit them.
+
+LEVEL ?= L0
+PY    ?= python
+
+.DEFAULT_GOAL := help
+.PHONY: help install catalog expand workbook test lint check clean all
+
+help:  ## Show this help
+	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  LEVEL=L0|L1|L2 selects the resolution rung (default: $(LEVEL))"
+
+install:  ## Install runtime + dev dependencies
+	$(PY) -m pip install -e ".[dev]"
+
+catalog:  ## Expand the YAML into candidates.csv at $(LEVEL)
+	$(PY) expand_catalog.py --level $(LEVEL)
+
+expand:  ## Stage B/C expansion on stage-4 survivors (needs survivors.txt)
+	@test -f survivors.txt || { echo "survivors.txt not found — screen the base grid first"; exit 1; }
+	$(PY) expand_catalog.py --level $(LEVEL) --expand --survivors survivors.txt
+
+workbook: catalog  ## Rebuild feature_catalog.xlsx
+	$(PY) build_workbook.py
+
+test:  ## Run the test suite
+	$(PY) -m pytest
+
+lint:  ## Static checks
+	$(PY) -m ruff check .
+
+check: test lint  ## Everything CI runs
+	@echo "ok — determinism is asserted by tests/test_determinism.py"
+
+clean:  ## Remove build artifacts
+	rm -rf candidates.csv feature_catalog.xlsx __pycache__ .pytest_cache .ruff_cache
+	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+all: check workbook  ## Full build
