@@ -1,0 +1,368 @@
+# =====================================================================
+# feature_space.yaml — generative registry for chargeback-fraud features
+# Consumed by expand_catalog.py. Edit THIS file, never the generated xlsx.
+#
+# Naming contract (enforced by the expander):
+#   {entity}__{measure}__{agg}__{window}[__f_{filter}][__t_{transform}]
+#
+# Every row the expander emits must be independently justifiable on:
+#   availability (computable at decision time), leakage (point-in-time),
+#   support (min n), and adversarial durability.
+# =====================================================================
+
+meta:
+  label: chargeback_fraud          # primary label; see labels: below
+  decision_point: pre_authorization
+  latency_budget_ms: 40            # p99 for the ENTIRE feature vector
+  as_of_rule: label_arrival_ts     # aggregates filter on label arrival, not event time
+  min_support_default: 30
+
+# ---------------------------------------------------------------------
+# LABELS — model more than one; they have near-disjoint predictors
+# ---------------------------------------------------------------------
+labels:
+  - id: cb_fraud
+    definition: chargeback with third-party-fraud reason code group
+    maturity_days_90pct: 30
+    notes: primary target
+  - id: cb_nonfraud
+    definition: service/product-not-received/duplicate reason groups (friendly/first-party)
+    maturity_days_90pct: 55
+    notes: longer tail; predicted by tenure/delivery/refund features, not by device/geo
+  - id: tc40_safe
+    definition: issuer fraud alert
+    maturity_days_90pct: 7
+    notes: fast proxy label; use for early readouts and as an entity feature
+  - id: decline_lost_stolen
+    definition: issuer response code = lost/stolen/pickup
+    maturity_days_90pct: 1
+    notes: near-immediate weak label
+  - id: review_confirmed_fraud
+    definition: manual review disposition
+    maturity_days_90pct: 3
+    notes: biased to reviewed population; use with propensity weights
+
+# ---------------------------------------------------------------------
+# ENTITIES — group-by keys
+# adversarial_cost: free | cheap | expensive   (how easily an attacker rotates it)
+# availability:     realtime | streaming | enrichment | batch_only
+# ---------------------------------------------------------------------
+entities:
+  # -- identity ------------------------------------------------------
+  - {id: cust,          name: Customer ID,               class: identity,     adversarial_cost: cheap,     availability: realtime,   priority: 1}
+  - {id: doc,           name: Document ID (KYC),         class: identity,     adversarial_cost: expensive, availability: realtime,   priority: 1}
+  - {id: doc_auth,      name: Document issuing authority,class: identity,     adversarial_cost: expensive, availability: realtime,   priority: 3}
+  - {id: natid,         name: National ID hash,          class: identity,     adversarial_cost: expensive, availability: realtime,   priority: 2}
+  - {id: name_norm,     name: Normalized name (metaphone),class: identity,    adversarial_cost: free,      availability: realtime,   priority: 2}
+  - {id: dob,           name: Date of birth,             class: identity,     adversarial_cost: expensive, availability: realtime,   priority: 3}
+  - {id: dob_surname,   name: DOB + surname pair,        class: identity,     adversarial_cost: expensive, availability: realtime,   priority: 2}
+  - {id: phone,         name: Phone number,              class: identity,     adversarial_cost: cheap,     availability: realtime,   priority: 1}
+  - {id: birth_country, name: Birth country,             class: identity,     adversarial_cost: expensive, availability: realtime,   priority: 3}
+  # -- instrument ----------------------------------------------------
+  - {id: pan,           name: Card token / PAN hash,     class: instrument,   adversarial_cost: expensive, availability: realtime,   priority: 1}
+  - {id: bin8,          name: BIN-8,                     class: instrument,   adversarial_cost: expensive, availability: realtime,   priority: 1}
+  - {id: bin6,          name: BIN-6,                     class: instrument,   adversarial_cost: expensive, availability: realtime,   priority: 2}
+  - {id: issuer,        name: Issuer (BIN-resolved),     class: instrument,   adversarial_cost: expensive, availability: enrichment, priority: 2}
+  # -- device / network ---------------------------------------------
+  - {id: device,        name: Device fingerprint ID,     class: device,       adversarial_cost: cheap,     availability: realtime,   priority: 1}
+  - {id: device_model,  name: Device model,              class: device,       adversarial_cost: free,      availability: realtime,   priority: 3}
+  - {id: os_browser,    name: OS+browser+locale triple,  class: device,       adversarial_cost: free,      availability: realtime,   priority: 3}
+  - {id: canvas,        name: Canvas/WebGL hash,         class: device,       adversarial_cost: cheap,     availability: realtime,   priority: 2}
+  - {id: ip,            name: IP /32,                    class: network,      adversarial_cost: free,      availability: realtime,   priority: 1}
+  - {id: ip24,          name: IP /24,                    class: network,      adversarial_cost: free,      availability: realtime,   priority: 1}
+  - {id: ip16,          name: IP /16,                    class: network,      adversarial_cost: free,      availability: realtime,   priority: 3}
+  - {id: asn,           name: ASN / ISP,                 class: network,      adversarial_cost: cheap,     availability: enrichment, priority: 1}
+  # -- email ---------------------------------------------------------
+  - {id: email,         name: Email (raw),               class: email,        adversarial_cost: free,      availability: realtime,   priority: 1}
+  - {id: email_canon,   name: Email canonicalized (dots/plus stripped), class: email, adversarial_cost: free, availability: realtime, priority: 1}
+  - {id: email_dom,     name: Email domain,              class: email,        adversarial_cost: free,      availability: realtime,   priority: 1}
+  - {id: email_mx,      name: Email MX host,             class: email,        adversarial_cost: free,      availability: enrichment, priority: 3}
+  # -- geo / address -------------------------------------------------
+  - {id: addr_bill,     name: Normalized billing address,class: geo,          adversarial_cost: cheap,     availability: realtime,   priority: 1}
+  - {id: addr_ship,     name: Normalized ship/payout addr,class: geo,         adversarial_cost: cheap,     availability: realtime,   priority: 1}
+  - {id: geohash5,      name: Geohash-5 of ship addr,    class: geo,          adversarial_cost: cheap,     availability: realtime,   priority: 2}
+  - {id: postcode,      name: Postcode,                  class: geo,          adversarial_cost: cheap,     availability: realtime,   priority: 2}
+  # -- counterparty / corridor --------------------------------------
+  - {id: receiver,      name: Receiver / payee ID,       class: counterparty, adversarial_cost: expensive, availability: realtime,   priority: 1}
+  - {id: recv_acct,     name: Receiver payout account/IBAN, class: counterparty, adversarial_cost: expensive, availability: realtime, priority: 1}
+  - {id: recv_bank,     name: Receiver bank,             class: counterparty, adversarial_cost: expensive, availability: enrichment, priority: 2}
+  - {id: recv_country,  name: Receiver country,          class: counterparty, adversarial_cost: expensive, availability: realtime,   priority: 1}
+  - {id: corridor,      name: Corridor (send x recv country), class: counterparty, adversarial_cost: expensive, availability: realtime, priority: 1}
+  - {id: send_recv,     name: Sender-Receiver pair,      class: counterparty, adversarial_cost: expensive, availability: realtime,   priority: 1}
+  # -- merchant ------------------------------------------------------
+  - {id: merchant,      name: Merchant ID,               class: merchant,     adversarial_cost: expensive, availability: realtime,   priority: 1}
+  - {id: mcc,           name: MCC,                       class: merchant,     adversarial_cost: expensive, availability: realtime,   priority: 2}
+  # -- graph-derived -------------------------------------------------
+  - {id: comp2,         name: Entity-graph component (2-hop), class: graph,   adversarial_cost: expensive, availability: streaming,  priority: 1}
+
+# Composite keys: expander forms these explicitly (do NOT auto-cross everything —
+# support collapses). Each listed pair must have a stated fraud hypothesis.
+composites:
+  - {id: device_x_bin8,       parts: [device, bin8],        hypothesis: card testing / BIN enumeration on one device}
+  - {id: ip24_x_merchant,     parts: [ip24, merchant],      hypothesis: distributed attack on a single merchant}
+  - {id: emaildom_x_recvctry, parts: [email_dom, recv_country], hypothesis: disposable-domain cohort targeting a corridor}
+  - {id: bin8_x_recvctry,     parts: [bin8, recv_country],  hypothesis: stolen-card issuer concentrated on one payout geo}
+  - {id: asn_x_mcc,           parts: [asn, mcc],            hypothesis: hosting/VPN traffic concentrated on resaleable goods}
+  - {id: device_x_corridor,   parts: [device, corridor],    hypothesis: mule device servicing one corridor}
+  - {id: cust_x_device,       parts: [cust, device],        hypothesis: ATO — new device on established customer}
+  - {id: recvacct_x_bin8,     parts: [recv_acct, bin8],     hypothesis: cash-out account funded by one issuer's cards}
+  - {id: addrship_x_pan,      parts: [addr_ship, pan],      hypothesis: drop address reuse across cards}
+  - {id: geohash5_x_mcc,      parts: [geohash5, mcc],       hypothesis: localized fraud cluster by goods type}
+
+# ---------------------------------------------------------------------
+# MEASURES — what gets aggregated
+# label_dependent: true => POINT-IN-TIME CRITICAL (filter on label_arrival_ts)
+# ---------------------------------------------------------------------
+measures:
+  # -- outcome (label-dependent) ------------------------------------
+  - {id: cb_rate,        name: Chargeback rate,               family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
+  - {id: cb_fraud_rate,  name: CB rate, fraud reason group,   family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
+  - {id: cb_nonfr_rate,  name: CB rate, non-fraud reason grp, family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
+  - {id: cb_amt,         name: Chargeback dollars,            family: outcome,   label_dependent: true,  dtype: money,   priority: 1}
+  - {id: tc40_rate,      name: TC40/SAFE alert rate,          family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
+  - {id: den_rate,       name: DEN rate (downstream rules),   family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
+  - {id: den_by_rule,    name: DEN rate by rule ID,           family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
+  - {id: err_rate,       name: ERR rate (issuer decline),     family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
+  - {id: err_lost_stln,  name: ERR rate, lost/stolen code,    family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
+  - {id: err_dnh,        name: ERR rate, do-not-honor code,   family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
+  - {id: sen_rate,       name: SEN (settle) rate,             family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
+  - {id: retry_success,  name: Approval-after-retry rate,     family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
+  - {id: refund_rate,    name: Refund rate,                   family: outcome,   label_dependent: true,  dtype: rate,    priority: 2}
+  - {id: review_conf,    name: Manual-review confirm rate,    family: outcome,   label_dependent: true,  dtype: rate,    priority: 2}
+  - {id: cb_lag_days,    name: Days from settle to dispute,   family: outcome,   label_dependent: true,  dtype: numeric, priority: 2}
+  - {id: block_rate,     name: Model block rate (policy)      , family: outcome, label_dependent: false, dtype: rate,    priority: 1}
+  # -- volume / velocity --------------------------------------------
+  - {id: txn_cnt,        name: Transaction count,             family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: amt,            name: Transaction amount,            family: velocity,  label_dependent: false, dtype: money,   priority: 1}
+  - {id: d_pan,          name: Distinct cards,                family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_device,       name: Distinct devices,              family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_email,        name: Distinct emails,               family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_cust,         name: Distinct customers,            family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_ip24,         name: Distinct IP /24s,              family: velocity,  label_dependent: false, dtype: count,   priority: 2}
+  - {id: d_receiver,     name: Distinct receivers (fan-out),  family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_sender,       name: Distinct senders (fan-in),     family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_bin8,         name: Distinct BINs tried,           family: velocity,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: d_country,      name: Distinct countries,            family: velocity,  label_dependent: false, dtype: count,   priority: 2}
+  - {id: d_mcc,          name: Distinct MCCs,                 family: velocity,  label_dependent: false, dtype: count,   priority: 2}
+  # -- behavioral ----------------------------------------------------
+  - {id: interarrival,   name: Inter-arrival seconds,         family: behavior,  label_dependent: false, dtype: numeric, priority: 1}
+  - {id: amt_repeat,     name: Repeat-identical-amount rate,  family: behavior,  label_dependent: false, dtype: rate,    priority: 1}
+  - {id: amt_escalate,   name: Small-then-large sequence cnt, family: behavior,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: fail_then_ok,   name: Failed-auth-then-success cnt,  family: behavior,  label_dependent: false, dtype: count,   priority: 1}
+  - {id: hour_entropy,   name: Hour-of-day entropy,           family: behavior,  label_dependent: false, dtype: numeric, priority: 2}
+  - {id: amt_entropy,    name: Amount entropy,                family: behavior,  label_dependent: false, dtype: numeric, priority: 2}
+  - {id: round_amt_rate, name: Round-amount rate,             family: behavior,  label_dependent: false, dtype: rate,    priority: 3}
+  # -- model-score ---------------------------------------------------
+  - {id: champ_score,    name: Champion model score,          family: score,     label_dependent: false, dtype: numeric, priority: 1}
+  - {id: rule_hits,      name: Rule-engine hit count,         family: score,     label_dependent: false, dtype: count,   priority: 2}
+
+# ---------------------------------------------------------------------
+# WINDOWS — geometric ladder so adjacent ratios are informative
+# ---------------------------------------------------------------------
+windows:
+  - {id: w1m,    label: 1 minute,   type: time,      seconds: 60,       realtime: true,  priority: 1}
+  - {id: w5m,    label: 5 minutes,  type: time,      seconds: 300,      realtime: true,  priority: 1}
+  - {id: w1h,    label: 1 hour,     type: time,      seconds: 3600,     realtime: true,  priority: 1}
+  - {id: w6h,    label: 6 hours,    type: time,      seconds: 21600,    realtime: true,  priority: 2}
+  - {id: w1d,    label: 1 day,      type: time,      seconds: 86400,    realtime: true,  priority: 1}
+  - {id: w7d,    label: 7 days,     type: time,      seconds: 604800,   realtime: true,  priority: 1}
+  - {id: w30d,   label: 30 days,    type: time,      seconds: 2592000,  realtime: true,  priority: 1}
+  - {id: w90d,   label: 90 days,    type: time,      seconds: 7776000,  realtime: true,  priority: 2}
+  - {id: w365d,  label: 365 days,   type: time,      seconds: 31536000, realtime: false, priority: 3}
+  - {id: life,   label: lifetime,   type: since,     seconds: null,     realtime: true,  priority: 2}
+  - {id: n10,    label: last 10 txn,type: count,     seconds: null,     realtime: true,  priority: 2}
+  - {id: n50,    label: last 50 txn,type: count,     seconds: null,     realtime: true,  priority: 3}
+  - {id: w30x7,  label: 30d ending 7d ago, type: excluding, seconds: 2592000, realtime: true, priority: 2}
+
+# ---------------------------------------------------------------------
+# FILTERS — conditioning sets. same_* narrows; diff_* is often the signal.
+# ---------------------------------------------------------------------
+filters:
+  - {id: none,          label: unconditioned,                    priority: 1}
+  - {id: same_mcc,      label: same MCC as current txn,          priority: 2}
+  - {id: same_ctry,     label: same country as current txn,      priority: 2}
+  - {id: same_amtband,  label: same amount decile,               priority: 3}
+  - {id: cross_border,  label: cross-border only,                priority: 2}
+  - {id: cnp,           label: card-not-present only,            priority: 2}
+  - {id: diff_device,   label: on a DIFFERENT device,            priority: 1}
+  - {id: diff_name,     label: with a DIFFERENT name,            priority: 1}
+  - {id: diff_recvctry, label: to a DIFFERENT receiver country,  priority: 1}
+  - {id: highrisk_corr, label: high-risk corridor only,          priority: 2}
+  - {id: offhours,      label: 00:00-05:00 local only,           priority: 3}
+  - {id: firstinsess,   label: first txn of session only,        priority: 3}
+
+# ---------------------------------------------------------------------
+# AGGREGATIONS — applies_to gates compatibility with measure dtype
+# ---------------------------------------------------------------------
+aggregations:
+  - {id: cnt,      name: count,                     applies_to: [count, rate, money, numeric], priority: 1}
+  - {id: rate,     name: rate (num/denom),          applies_to: [rate],                        priority: 1}
+  - {id: sum,      name: sum,                       applies_to: [money, count],                priority: 1}
+  - {id: mean,     name: mean,                      applies_to: [money, numeric],              priority: 1}
+  - {id: med,      name: median,                    applies_to: [money, numeric],              priority: 2}
+  - {id: std,      name: std dev,                   applies_to: [money, numeric],              priority: 2}
+  - {id: cv,       name: coefficient of variation,  applies_to: [money, numeric],              priority: 2}
+  - {id: max,      name: max,                       applies_to: [money, numeric],              priority: 1}
+  - {id: min,      name: min,                       applies_to: [money, numeric],              priority: 2}
+  - {id: p90,      name: 90th percentile,           applies_to: [money, numeric],              priority: 2}
+  - {id: dcnt,     name: distinct count,            applies_to: [count],                       priority: 1}
+  - {id: entropy,  name: entropy of distribution,   applies_to: [count],                       priority: 3}
+  - {id: hhi,      name: Herfindahl concentration,  applies_to: [count],                       priority: 3}
+  - {id: tsl,      name: time since last,           applies_to: [count, money, rate, numeric], priority: 1}
+  - {id: tsf,      name: time since first,          applies_to: [count, money, rate, numeric], priority: 1}
+  - {id: ewma,     name: EWMA,                      applies_to: [rate, money, count],          priority: 2}
+  - {id: slope,    name: trend slope,               applies_to: [rate, money, count],          priority: 3}
+
+# ---------------------------------------------------------------------
+# TRANSFORMS — post-aggregation. This is where "lag differences" generalize.
+# ---------------------------------------------------------------------
+transforms:
+  - {id: raw,       name: raw value,                                  formula: "x",                                    priority: 1}
+  - {id: log1p,     name: log1p,                                      formula: "log(1+x)",                             priority: 1}
+  - {id: ratio_sl,  name: short/long window ratio (burst index),      formula: "(x_short/len_short)/(x_long/len_long)",priority: 1}
+  - {id: delta_lag, name: delta vs prior equal-length window,         formula: "x_t - x_{t-1}",                        priority: 1}
+  - {id: lograt_lag,name: log-ratio vs prior equal-length window,     formula: "log((x_t+a)/(x_{t-1}+a))",             priority: 1}
+  - {id: accel,     name: second difference (acceleration),           formula: "(x_t - x_{t-1}) - (x_{t-1} - x_{t-2})",priority: 3}
+  - {id: z_self,    name: z-score vs entity's own trailing history,   formula: "(x - mu_entity)/sd_entity",            priority: 1}
+  - {id: z_pop,     name: z-score vs population at same timestamp,    formula: "(x - mu_pop_t)/sd_pop_t",              priority: 1}
+  - {id: pct_pop,   name: percentile rank in population at same ts,   formula: "rank(x)/n_pop_t",                      priority: 2}
+  - {id: shrunk,    name: empirical-Bayes shrink toward parent entity,formula: "(n*p_hat + k*p_parent)/(n+k)",         priority: 1}
+  - {id: decay,     name: exponentially recency-weighted rate,        formula: "sum(w_i*y_i)/sum(w_i), w=exp(-dt/tau)",priority: 1}
+  - {id: share,     name: share of entity's parent total,             formula: "x_entity / x_parent",                  priority: 2}
+
+# ---------------------------------------------------------------------
+# RESOLUTION LADDER — coarse-to-fine search control
+#
+# Slots split into two kinds:
+#   COVERAGE   entities, measures, non-grid families. A missing quantity is a
+#              blind spot no resolution recovers. Search these exhaustively
+#              from the start, at every level.
+#   RESOLUTION windows, transforms, filters, aggregations, entity granularity.
+#              Steeply diminishing returns. Start coarse, refine on evidence.
+#
+# WHY THIS IS SAFE ON WINDOWS
+#   For nested count windows under a homogeneous Poisson arrival process,
+#     corr(N_short, N_long) = sqrt(w_short / w_long)
+#   because Cov(N_s, N_l) = Var(N_s). Real streams are burstier and
+#   autocorrelated, so measured correlation runs ABOVE this floor — treat it
+#   as a lower bound and measure your own. Consequence: windows spaced under
+#   ~x4 are >0.5 correlated and stage-6 redundancy clustering will collapse
+#   them anyway. Fine resolution up front pays to build features you delete.
+#
+#   Corollary 1: the ratio transform DECORRELATES. {raw_long, ratio_s/l}
+#   carries far more independent signal than {raw_short, raw_long}.
+#   Corollary 2: w30x7 (30d ending 7d ago) is the disjoint complement of w7d —
+#   uncorrelated by construction. One disjoint pair beats three nested ones.
+#
+# COST (tier-1, from expand_catalog.py --level)
+#   level   A(base)   +B(transforms)   +C(filters)   total
+#   L0        1,396          8,896         4,043     14,335
+#   L1        3,016         19,192         8,734     30,942
+#   L2        3,918         24,716        11,345     39,979
+#   Note windows are the SECOND-order saving. The dominant multiplier is the
+#   B/C expansion (~10x), which is why it is already deferred to post-screen.
+# ---------------------------------------------------------------------
+resolution_ladder:
+
+  # ---- L0 PROBE: one anchor per decade of timescale --------------------
+  # Nothing within x10 of its neighbour. Run this across the FULL coverage
+  # space (all entities, all measures, all non-grid families). Breadth on
+  # coverage, coarseness on resolution.
+  L0:
+    windows:
+      outcome:  [w30d]
+      velocity: [w1h, w30d]
+      behavior: [w1h]
+      score:    [w30d]
+    transforms: [raw, shrunk]
+    filters:    [none]
+    aggregations: [cnt, sum, mean, dcnt, rate, tsl]
+    entity_granularity:   # one level per family; do not build siblings yet
+      network: [ip24, asn]
+      instrument: [pan, bin8]
+      email: [email_canon, email_dom]
+
+  # ---- L1 STANDARD: ~x6-x8 spacing, corr floor ~0.38 -------------------
+  L1:
+    windows:
+      outcome:  [w7d, w30d, w90d]
+      velocity: [w5m, w1h, w1d, w30d]
+      behavior: [w5m, w1h, w1d]
+      score:    [w1d, w30d]
+    transforms: [raw, shrunk, ratio_sl, z_pop, decay]
+    filters:    [none, diff_device, diff_name, diff_recvctry]
+    aggregations: [cnt, sum, mean, dcnt, rate, tsl, tsf, max, std, ewma]
+    entity_granularity:
+      network: [ip24, asn, ip]
+      instrument: [pan, bin8]
+      email: [email_canon, email_dom, email]
+
+  # ---- L2 FULL: everything in the registries ---------------------------
+  L2:
+    windows:
+      outcome:  [w7d, w30d, w90d, w365d, life, w30x7]
+      velocity: [w5m, w1h, w6h, w1d, w7d, w30d, life, n10, n50]
+      behavior: [w1m, w5m, w1h, w1d, w7d, n10]
+      score:    [w1d, w7d, w30d, life]
+    transforms: ALL
+    filters:    ALL
+    aggregations: ALL
+    entity_granularity: ALL
+
+# ---------------------------------------------------------------------
+# REFINEMENT TRIGGERS — when a quantity earns finer resolution.
+# All three gates must hold. Resolution is a PER-QUANTITY attribute:
+# never bump a whole family because one quantity needed it.
+# ---------------------------------------------------------------------
+refinement_triggers:
+  - id: survived_screen
+    rule: >
+      The quantity reached stage 7 with non-trivial SHAP. No refinement around
+      a quantity that did not clear the screen.
+  - id: scale_gradient
+    rule: >
+      Importance varies materially between adjacent tested scales. If 1h and
+      30d score alike, the model is reading the entity, not the timescale —
+      interpolating between them adds nothing. Refine only BETWEEN the two
+      scales that differ.
+  - id: marginal_gain
+    rule: >
+      Add the intermediate window, retrain, require delta-AUC (or delta-net-$
+      at the operating point) above a pre-registered threshold on holdout.
+      Log the result either way; a recorded negative stops the next person
+      re-testing it. See the Refinement Log sheet.
+  - id: edge_of_grid
+    rule: >
+      If the best window for a quantity is the shortest or longest tested, the
+      optimum is likely OUTSIDE the range. Add an anchor beyond the edge before
+      subdividing inside it. This is where genuinely new signal hides — sub-minute
+      velocity for card testing, multi-year age for synthetic identity.
+    priority: check_first
+
+
+# Expected to carry the majority of incremental lift. Agent must enumerate
+# each fully in the workbook, not sample from it.
+# ---------------------------------------------------------------------
+nongrid_families:
+  - {id: graph,        name: Relational / entity graph,        min_features: 12}
+  - {id: novelty,      name: Entity age & first-seen novelty,  min_features: 14}
+  - {id: deviation,    name: Deviation from customer baseline, min_features: 12}
+  - {id: consistency,  name: Cross-field consistency & geo,    min_features: 16}
+  - {id: strings,      name: Identifier string/entropy,        min_features: 12}
+  - {id: sequence,     name: Session & event sequence,         min_features: 16}
+  - {id: biometrics,   name: Client telemetry / behavioral bio,min_features: 12}
+  - {id: instrument,   name: Auth & instrument attributes,     min_features: 12}
+  - {id: basket,       name: Basket & fulfillment,             min_features: 12}
+  - {id: population,   name: Population-context / regime,      min_features: 8}
+
+# ---------------------------------------------------------------------
+# FRAUD TYPOLOGIES — coverage must be proven for each
+# ---------------------------------------------------------------------
+typologies:
+  - {id: stolen_cnp,  name: Stolen-card CNP}
+  - {id: ato,         name: Account takeover}
+  - {id: card_test,   name: Card testing / enumeration}
+  - {id: synthetic,   name: Synthetic identity}
+  - {id: mule,        name: Mule / laundering / cash-out}
+  - {id: friendly,    name: First-party / friendly fraud}
+  - {id: refund_abuse,name: Refund & policy abuse}
