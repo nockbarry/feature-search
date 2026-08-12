@@ -7,7 +7,7 @@ LEVEL ?= L0
 PY    ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install validate checklist catalog expand workbook pack test lint check clean all
+.PHONY: help install validate checklist catalog expand workbook pack accept test lint check clean all
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -36,6 +36,10 @@ workbook: catalog  ## Rebuild feature_catalog.xlsx (human fill-in surface)
 
 pack: catalog  ## Assemble pack/ — the model-facing context pack
 	$(PY) pack.py --level $(LEVEL)
+
+accept:  ## Validate a filled queue: make accept QUEUE=path/to/queue.csv
+	@test -n "$(QUEUE)" || { echo "usage: make accept QUEUE=path/to/filled_queue.csv"; exit 1; }
+	$(PY) validate_queue.py "$(QUEUE)" --catalog candidates.csv --strict
 
 test:  ## Run the test suite
 	$(PY) -m pytest

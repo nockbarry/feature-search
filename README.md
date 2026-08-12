@@ -36,6 +36,7 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 | `spec/data_requirements.yaml` | **What to look for inside the company.** 42 requirements: aliases to search the catalog for, how to verify a match, what breaks without it. |
 | `discover.py` | Renders the checklist; takes a filled binding and reports which entities, measures and families it unlocks. |
 | `validate.py` | Schema and invariant checks on the YAML. Runs before every expansion. |
+| `validate_queue.py` | Checks what the **agent wrote back**: that the evidence each row claims actually exists. `make accept QUEUE=...` |
 | `expand_catalog.py` | Expands the YAML into `candidates.csv`. Flags: `--level`, `--max-tier`, `--expand`, `--survivors`. |
 | `nongrid_features.py` | 143 hand-enumerated features the grammar cannot express. Expected to carry most of the lift. |
 | `build_workbook.py` | Generates `feature_catalog.xlsx` — the human fill-in surface. |
@@ -129,11 +130,12 @@ Why coarsening is safe: for nested count windows under a Poisson arrival process
 make test
 ```
 
-85 tests. The ones that matter:
+103 tests. The ones that matter:
 
 - `test_pit_leakage.py` — every expected value hand-computed from the fixture and stated in the test docstring. Checks against ground truth, not against last week's output.
 - `test_compatibility.py::test_coverage_is_never_gated_by_resolution` — enforces the contract that resolution rungs prune windows and sibling granularities but never remove a measure or an entity class.
 - `test_validate.py` — every check is proven to reject a specific known-bad spec, so the validator cannot pass everything and be mistaken for coverage.
+- `test_validate_queue.py` — two anchors, both required: a queue with planted defects is rejected item by item, *and* a large honest queue passes under `--strict` with zero warnings. A validator that rejects everything gets switched off, and then the fabrication it existed to catch ships anyway.
 - `test_discover.py::test_every_registry_id_is_reachable` — every entity, measure and family must be unlocked by some requirement, or the checklist can read as complete while part of the search stays unbuildable. It found two such holes on first run.
 - `test_discover.py::test_unverified_find_does_not_count` — a `found` that skipped its verify step must leave the entity blocked. The canonical case is a per-session cookie bound as a device fingerprint.
 - `test_pack.py::test_every_dropped_column_round_trips` — the pack drops 13 queue columns claiming they are recoverable from `feature_name`; this decodes all 1,167 rows and checks every one, so the trim is verified rather than asserted.

@@ -38,7 +38,12 @@ SCHEMA = {
     "transforms": ({"id", "name", "formula", "priority"}, set()),
     "nongrid_families": ({"id", "name", "min_features"}, set()),
     "typologies": ({"id", "name"}, {"note"}),
+    "queue_statuses": ({"id", "terminal", "requires", "meaning"}, set()),
 }
+
+# Columns a queue status may demand as evidence. Anything else is a typo that
+# would make validate_queue.py demand a column that does not exist.
+QUEUE_FILL_COLS = {"iv", "psi_12m", "coverage_pct", "shap_rank", "drop_reason"}
 
 ENUMS = {
     ("entities", "class"): {"identity", "instrument", "device", "network", "email",
@@ -189,6 +194,23 @@ def check(spec, nongrid):
         if isinstance(le, dict) and not isinstance(le.get("maturity_days_90pct"), (int, float)):
             E(f"labels.{le.get('id')}: maturity_days_90pct must be numeric — the split "
               f"protocol's embargo width is derived from it")
+
+    # ---- 6b. queue statuses ---------------------------------------------------
+    statuses = spec.get("queue_statuses") or []
+    for s in statuses:
+        if not isinstance(s, dict):
+            continue
+        if not isinstance(s.get("terminal"), bool):
+            E(f"queue_statuses.{s.get('id')}: terminal must be true/false")
+        for col in s.get("requires") or []:
+            if col not in QUEUE_FILL_COLS:
+                E(f"queue_statuses.{s.get('id')}: requires '{col}', which is not a "
+                  f"queue fill-in column {sorted(QUEUE_FILL_COLS)}")
+    if statuses and not any(s.get("terminal") for s in statuses if isinstance(s, dict)):
+        E("queue_statuses: no terminal status — definition of done #1 is unsatisfiable")
+    if statuses and not any(s.get("id") == "blocked" for s in statuses if isinstance(s, dict)):
+        W("queue_statuses: no 'blocked' status — an agent that cannot compute a "
+          "screen has nowhere honest to put the row, so it will guess a number")
 
     # ---- 7. nongrid_features.py agrees with the registries -------------------
     typ_ids = {t["id"] for t in spec.get("typologies") or [] if isinstance(t, dict)}

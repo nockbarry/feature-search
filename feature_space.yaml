@@ -43,6 +43,60 @@ labels:
     notes: biased to reviewed population; use with propensity weights
 
 # ---------------------------------------------------------------------
+# QUEUE STATUSES — the vocabulary an agent writes back into the queue.
+#
+# This lived only inside build_workbook.py, which the context pack excludes,
+# so an agent working from queue.csv had no way to know the legal values.
+# It belongs here, with the rest of the source of truth.
+#
+# `requires` is the evidence a status implies. The pruning funnel is ORDERED:
+# you cannot report a stage-4 IV without stage-3 coverage having been measured
+# first. validate_queue.py enforces that — a status claiming a screen that left
+# no evidence behind is a claim with nothing under it, and it is the failure
+# mode that survives all the way to a shipped feature set.
+#
+# `terminal` marks the states that satisfy definition-of-done #1.
+# ---------------------------------------------------------------------
+queue_statuses:
+  - id: candidate
+    terminal: false
+    requires: []
+    meaning: enumerated, not yet examined. The starting value for every row.
+
+  - id: blocked
+    terminal: true
+    requires: [drop_reason]
+    meaning: >
+      Cannot be screened — a required input is absent or unbound. NOT a drop.
+      This is a data request with an owner. Use this instead of guessing;
+      drop_reason must name the requirement id from spec/data_requirements.yaml.
+
+  - id: built
+    terminal: false
+    requires: [coverage_pct]
+    meaning: implemented and computable at decision time; stages 1-2 passed.
+
+  - id: screened
+    terminal: false
+    requires: [coverage_pct, psi_12m, iv]
+    meaning: survived the univariate and stability screens (stages 3-4).
+
+  - id: shipped
+    terminal: true
+    requires: [coverage_pct, psi_12m, iv, shap_rank]
+    meaning: >
+      In the final feature set. Implies stage 7 multivariate selection ran and
+      stage 9 re-ranking at the operating point was recorded.
+
+  - id: dropped
+    terminal: true
+    requires: [drop_reason]
+    meaning: >
+      Screened out. drop_reason must name the funnel stage that killed it, and
+      that stage's own metric must be present — dropping for "low IV" with an
+      empty iv column asserts a measurement nobody made.
+
+# ---------------------------------------------------------------------
 # ENTITIES — group-by keys
 # adversarial_cost: free | cheap | expensive   (how easily an attacker rotates it)
 # availability:     realtime | streaming | enrichment | batch_only

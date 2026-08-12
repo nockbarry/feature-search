@@ -63,6 +63,7 @@ DISCOVERY_FILES = [
 ]
 
 CORRECTNESS_FILES = [
+    ("validate_queue.py", "Run this on your filled queue BEFORE returning it. It checks that the evidence each row claims actually exists."),
     ("pit_aggregate_template.sql", "Warehouse implementation of the two-clock rule, shrinkage, censoring correction."),
     ("pit_reference.py", "The same logic in dependency-free Python. Executable spec."),
     ("tests/test_pit_leakage.py", "ACCEPTANCE TEST. Hand-computed fixtures your SQL must reproduce."),
@@ -122,7 +123,7 @@ def decode(feature_name, spec, entities_by_id):
     }
 
 
-def manifest(level, rows, sizes, constants):
+def manifest(level, rows, sizes, constants, statuses):
     tot = sum(sizes.values())
     lines = [
         "# Context pack — feature search",
@@ -167,6 +168,35 @@ def manifest(level, rows, sizes, constants):
     ]
     lines += [f"- `{k}` = `{v}`" for k, v in sorted(constants.items())]
     lines += [
+        "",
+        "## Writing the queue back",
+        "",
+        "Legal `status` values are declared in `feature_space.yaml` under",
+        "`queue_statuses`, each with the evidence it requires:",
+        "",
+        "| status | terminal | requires |",
+        "|---|---|---|",
+        "|" + "|\n|".join(
+            f" `{s['id']}` | {'yes' if s['terminal'] else 'no'} | "
+            f"{', '.join(f'`{c}`' for c in s['requires']) or '—'} "
+            for s in statuses) + "|",
+        "",
+        "**If you cannot compute a screen, set `blocked` and name the missing input in",
+        "`drop_reason`. Never write a number you did not compute.** A blocked row is a",
+        "data request with an owner; an invented number is a feature selected on fiction,",
+        "and nothing downstream will catch it.",
+        "",
+        "Before returning the queue:",
+        "",
+        "```bash",
+        "python validate_queue.py queue.csv --catalog <the queue as delivered> --strict",
+        "```",
+        "",
+        "It rejects rows whose status claims work that left no evidence: a `shipped` with",
+        "no `shap_rank`, a stage-4 IV with no stage-3 stability, a drop for \"low IV\" with",
+        "an empty `iv` column, duplicate ranks, and identical metric triples repeated",
+        "across distinct features. These are structural checks, not taste — each one",
+        "identifies a claim that contradicts itself.",
         "",
         "## Before you report any number",
         "",
@@ -280,7 +310,7 @@ def build(level="L0", out="pack", candidates="candidates.csv", spec_path="featur
 
     mpath = os.path.join(outdir, "MANIFEST.md")
     with open(mpath, "w") as f:
-        f.write(manifest(level, len(rows), sizes, constants))
+        f.write(manifest(level, len(rows), sizes, constants, spec["queue_statuses"]))
 
     full = os.path.getsize(cpath) + sum(
         os.path.getsize(os.path.join(ROOT, n))

@@ -114,6 +114,19 @@ def test_discovery_runs_standalone_from_the_pack(packed):
     assert r.returncode == 1, "the example binding is meant to report as blocking"
 
 
+def test_write_back_contract_ships(packed):
+    """
+    The output guard is worthless if the agent does not know it will be run, and
+    the status vocabulary used to live only in build_workbook.py — which the pack
+    excludes. Both must travel with the queue.
+    """
+    assert (packed / "validate_queue.py").exists()
+    text = (packed / "MANIFEST.md").read_text()
+    assert "Never write a number you did not compute" in text
+    for status in ("blocked", "shipped", "dropped"):
+        assert f"`{status}`" in text, f"manifest does not declare the {status} status"
+
+
 def test_manifest_puts_discovery_before_the_queue(packed):
     """Screening the queue before binding inputs is wasted work; read order
     must say so."""

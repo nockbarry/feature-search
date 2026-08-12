@@ -93,7 +93,13 @@ readme = [
  ("Leakage Audit", "Mandatory checks. A feature that has not passed all of these may not ship."),
  ("Pruning Funnel", "Eight-stage screen with live counts. Record survivors at each stage."),
  ("", ""),
- ("STATUS VALUES", "candidate -> built -> screened -> shipped, or dropped (drop_reason required)"),
+ # Read from the spec rather than restated here: this literal WAS the only
+ # definition of the vocabulary, and it lived in a file the context pack
+ # excludes, so an agent working from queue.csv could not know the legal values.
+ ("STATUS VALUES", " | ".join(f"{s['id']}{'' if s['terminal'] else ' (non-terminal)'}"
+                              for s in SPEC["queue_statuses"])),
+ ("STATUS EVIDENCE", "Each status requires its columns filled; validate_queue.py enforces it. "
+                     "Cannot compute? Use 'blocked' — never a guessed number."),
  ("CELL COLOURS", "Blue text = agent fills these in. Black = generated, do not overwrite."),
  ("", ""),
  ("NON-NEGOTIABLES", ""),
