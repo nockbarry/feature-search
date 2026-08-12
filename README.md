@@ -12,8 +12,9 @@ Built for a pre-authorization block/pass decision over a `SEN` / `DEN` / `ERR` /
 
 ```bash
 make install          # runtime + dev deps
-make workbook         # feature_catalog.xlsx at the L0 probe rung
-make check            # tests + lint
+make pack             # pack/ — the model-facing context pack
+make workbook         # feature_catalog.xlsx — the human fill-in surface
+make check            # validate + tests + lint
 ```
 
 Then open `AGENT_BRIEF.md`. Everything else is referenced from it.
@@ -34,7 +35,8 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 | `validate.py` | Schema and invariant checks on the YAML. Runs before every expansion. |
 | `expand_catalog.py` | Expands the YAML into `candidates.csv`. Flags: `--level`, `--max-tier`, `--expand`, `--survivors`. |
 | `nongrid_features.py` | 143 hand-enumerated features the grammar cannot express. Expected to carry most of the lift. |
-| `build_workbook.py` | Generates `feature_catalog.xlsx` — the agent's work queue. |
+| `build_workbook.py` | Generates `feature_catalog.xlsx` — the human fill-in surface. |
+| `pack.py` | Assembles `pack/` — spec, correctness files and a slimmed queue, ~40% the size of a whole-repo handover. |
 | `pit_reference.py` | Executable spec of the two-clock rule. Mirrors the SQL; testable in CI. |
 | `pit_aggregate_template.sql` | Warehouse implementation: PIT aggregation, shrinkage, censoring correction, parity harness. |
 | `docs/split_protocol.md` | Embargo and purging under label maturity. |
@@ -42,7 +44,24 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 | `docs/label_definition.md` | Reason-code mapping and dispute-lifecycle edge cases. |
 | `tests/` | Compatibility rules, naming contract, determinism, spec validation, and the leakage fixtures. |
 
-**`candidates.csv` and `feature_catalog.xlsx` are build artifacts.** They are gitignored and CI fails if either is committed. Edit the YAML and regenerate.
+**`candidates.csv`, `feature_catalog.xlsx` and `pack/` are build artifacts.** They are gitignored and CI fails if either is committed. Edit the YAML and regenerate.
+
+---
+
+## Handing it to a model
+
+`make pack` produces `pack/` — the specification, the executable definition of
+point-in-time correctness, and a slimmed work queue, with a `MANIFEST.md` that
+declares read order and names the known gaps. Roughly **65k tokens instead of
+169k** for a whole-repo handover, with nothing a model reasons from removed.
+
+The build pipeline, CI and the tests stay out of it: they generate and guard the
+pack, they are not inputs to the search. `feature_catalog.xlsx` stays out too —
+it is the human fill-in surface, and a model reads `queue.csv` strictly better.
+
+`pack/test_pit_leakage.py` ships as an **acceptance test**, not a repo test:
+whatever the agent implements in the warehouse has to reproduce its
+hand-computed fixtures.
 
 ---
 
@@ -84,11 +103,12 @@ Why coarsening is safe: for nested count windows under a Poisson arrival process
 make test
 ```
 
-60 tests. The ones that matter:
+71 tests. The ones that matter:
 
 - `test_pit_leakage.py` — every expected value hand-computed from the fixture and stated in the test docstring. Checks against ground truth, not against last week's output.
 - `test_compatibility.py::test_coverage_is_never_gated_by_resolution` — enforces the contract that resolution rungs prune windows and sibling granularities but never remove a measure or an entity class.
 - `test_validate.py` — every check is proven to reject a specific known-bad spec, so the validator cannot pass everything and be mistaken for coverage.
+- `test_pack.py::test_every_dropped_column_round_trips` — the pack drops 13 queue columns claiming they are recoverable from `feature_name`; this decodes all 1,167 rows and checks every one, so the trim is verified rather than asserted.
 - `test_determinism.py` — regeneration must be byte-identical, or diffs become unreadable and the agent's fills can no longer be matched to their features.
 
 ---

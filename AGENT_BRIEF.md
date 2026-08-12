@@ -11,7 +11,7 @@ You are **not** being asked to build a model. You are being asked to produce a d
 
 **Deliverables, in order:**
 
-1. `feature_catalog.xlsx` fully populated — every candidate has a terminal status, every drop has a reason.
+1. The work queue fully populated — every candidate has a terminal status, every drop has a reason. Working from a context pack, that is `queue.csv`; working in the repo, `feature_catalog.xlsx`. Same rows, same fill-in columns.
 2. Built feature implementations for all survivors, in the serving path's own code.
 3. A leakage audit signed off per the workbook's Leakage Audit sheet.
 4. A serving-parity report: offline-vs-shadow value diff for the shipped vector.
@@ -241,6 +241,7 @@ Step 9 is not optional and is routinely skipped. Global importance is dominated 
 | `nongrid_features.py` | The 143 seeded non-grid features. Extend it. |
 | `build_workbook.py` | Regenerates `feature_catalog.xlsx` from the above. |
 | `pit_aggregate_template.sql` | Reference implementation of the two-clock rule, shrinkage, censoring correction, and the parity harness. |
+| `pack.py` | `make pack` → `pack/`, the model-facing subset with a read-order manifest. What you hand over. |
 | `validate.py` | Schema and invariant checks on the registries. `make catalog` runs it first, so a malformed spec fails loudly instead of expanding into a plausible catalog with a hole in it. |
 | `pit_reference.py` | The same logic in dependency-free Python — an executable spec CI can exercise. Also holds `naive_aggregate_LEAKY`, the bug kept deliberately so the suite can prove the correct path differs from it. |
 | `feature_catalog.xlsx` | The work queue. Blue cells are yours to fill. **Build artifact** — gitignored, CI fails if committed. |

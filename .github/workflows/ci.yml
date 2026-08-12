@@ -73,6 +73,10 @@ jobs:
           python expand_catalog.py --level L0
           python build_workbook.py
 
+      - name: Build context pack
+        run: |
+          python pack.py --level L0
+
       - name: Upload catalog for review
         uses: actions/upload-artifact@v4
         with:
@@ -80,5 +84,6 @@ jobs:
           path: |
             /tmp/L0.csv
             feature_catalog.xlsx
+            pack/
           if-no-files-found: warn
           retention-days: 14

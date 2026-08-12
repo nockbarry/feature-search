@@ -7,7 +7,7 @@ LEVEL ?= L0
 PY    ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install validate catalog expand workbook test lint check clean all
+.PHONY: help install validate catalog expand workbook pack test lint check clean all
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -28,8 +28,11 @@ expand:  ## Stage B/C expansion on stage-4 survivors (needs survivors.txt)
 	@test -f survivors.txt || { echo "survivors.txt not found — screen the base grid first"; exit 1; }
 	$(PY) expand_catalog.py --level $(LEVEL) --expand --survivors survivors.txt
 
-workbook: catalog  ## Rebuild feature_catalog.xlsx
+workbook: catalog  ## Rebuild feature_catalog.xlsx (human fill-in surface)
 	$(PY) build_workbook.py
+
+pack: catalog  ## Assemble pack/ — the model-facing context pack
+	$(PY) pack.py --level $(LEVEL)
 
 test:  ## Run the test suite
 	$(PY) -m pytest

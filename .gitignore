@@ -2,6 +2,7 @@
 # Committing these guarantees drift between feature_space.yaml and the artifact.
 candidates.csv
 feature_catalog.xlsx
+pack/
 survivors.txt
 
 __pycache__/
