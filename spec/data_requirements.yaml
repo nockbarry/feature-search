@@ -1,0 +1,793 @@
+# =====================================================================
+# data_requirements.yaml — what to go looking for inside the company.
+#
+# The registries in feature_space.yaml say what the search WANTS. This file
+# says what has to exist in your warehouse for each of those to be buildable,
+# in terms an agent can actually search a data catalog with: what the thing is,
+# what it tends to be CALLED, how to tell a real match from a lookalike, and
+# what breaks if it is missing.
+#
+# Consumed by discover.py:
+#   python discover.py --checklist            -> DISCOVERY_CHECKLIST.md
+#   python discover.py --binding binding.yaml -> coverage report
+#
+# FIELD SEMANTICS
+#   id            stable key; referenced by binding files
+#   what          one line, plain language
+#   aliases       names this appears under in real systems. SEARCH TERMS —
+#                 the agent greps the catalog for these. Add liberally; a
+#                 false positive costs one verification, a miss costs a feature
+#                 family.
+#   dtype         expected type
+#   source_kind   transaction_record | event_stream | label_feed |
+#                 vendor_enrichment | derived
+#   criticality   core     — the search cannot start without it
+#                 high     — a whole entity class or typology dies without it
+#                 medium   — a family degrades
+#                 optional — nice to have
+#   unlocks_*     ids from feature_space.yaml that become buildable. This is
+#                 what makes coverage computable instead of a guess.
+#   verify        how to confirm the field you found is the field meant. Skipping
+#                 this is how you bind `device_id` to a per-session cookie and
+#                 spend two weeks on features with no cross-session linkage.
+#   gotchas       the trap. Read before binding.
+#
+# Absent from a company's stack is a normal answer. Record it as `absent` in
+# the binding rather than leaving it blank — "we looked and do not have it" and
+# "nobody checked" have opposite consequences for the search plan.
+# =====================================================================
+
+version: 1
+
+groups:
+
+  # -------------------------------------------------------------------
+  - id: core_txn
+    name: Core transaction record
+    note: >
+      Without every core item below there is no search at all — not a degraded
+      one. Confirm these first, before spending any time on enrichment.
+    requirements:
+
+      - id: txn_id
+        what: Unique identifier for the authorization attempt
+        aliases: [transaction_id, txn_id, auth_id, payment_id, order_id, request_id, trace_id]
+        dtype: string
+        source_kind: transaction_record
+        criticality: core
+        verify: >
+          Must be unique per AUTHORIZATION ATTEMPT, not per order. If one order
+          with three retries shares one id, retry and failed-then-success
+          features are unbuildable and velocity counts are wrong.
+        gotchas: >
+          Many stacks have both an order id and an attempt id and name the
+          attempt one ambiguously. Check the row count ratio against orders.
+
+      - id: event_ts
+        what: Timestamp the authorization decision was made
+        aliases: [event_time, txn_ts, created_at, auth_ts, request_time, decision_time]
+        dtype: timestamp
+        source_kind: transaction_record
+        criticality: core
+        unlocks_windows: all
+        unlocks_measures: [hour_entropy]
+        verify: >
+          Confirm the timezone and whether it is decision time or settlement
+          time. Compare against a known incident window.
+        gotchas: >
+          `created_at` on a mutable orders table is often the row's INSERT time
+          and can be later than the decision. Every window in the search is
+          anchored on this field; if it is wrong, everything is wrong.
+
+      - id: label_arrival_ts
+        what: Timestamp WE LEARNED an outcome, distinct from when it occurred
+        aliases: [reported_at, received_at, ingested_at, posted_date, alert_date,
+                  network_report_date, load_ts, _etl_loaded_at]
+        dtype: timestamp
+        source_kind: label_feed
+        criticality: core
+        verify: >
+          Take a chargeback and confirm this is strictly later than the
+          transaction's event_ts, typically by days to weeks. If the two are
+          equal or near-equal for most rows, you have found a backfilled column
+          and not an arrival clock.
+        gotchas: >
+          THE most important field in this document and the one most often
+          missing. Warehouses routinely overwrite dispute rows in place, keeping
+          only the current state, which destroys arrival history. If it does not
+          exist, an ETL audit log or CDC stream may reconstruct it; if nothing
+          can, say so loudly — every outcome-rate feature in the catalog becomes
+          unverifiable and the two-clock rule cannot be enforced.
+          See docs/split_protocol.md and tests/test_pit_leakage.py.
+
+      - id: amount
+        what: Transaction amount, plus its currency
+        aliases: [amount, amt, value, total, order_total, transaction_amount,
+                  amount_minor, currency, currency_code]
+        dtype: numeric + string
+        source_kind: transaction_record
+        criticality: core
+        unlocks_measures: [amt, amt_repeat, amt_escalate, amt_entropy, round_amt_rate, cb_amt]
+        verify: >
+          Establish minor vs major units (cents vs dollars) and whether a
+          currency conversion has already been applied. Check the min: a minimum
+          of 1 usually means minor units.
+        gotchas: >
+          Mixed-currency portfolios where amount is unconverted make
+          repeat-amount and round-amount features meaningless across corridors.
+          Bind a normalized amount too if one exists.
+
+      - id: disposition
+        what: Funnel outcome — SEN / DEN / ERR
+        aliases: [status, txn_status, disposition, result, state, outcome,
+                  settlement_status, auth_result]
+        dtype: enum
+        source_kind: transaction_record
+        criticality: core
+        unlocks_measures: [sen_rate, den_rate, err_rate, txn_cnt]
+        verify: >
+          Map every distinct value to exactly one of SEN / DEN / ERR and confirm
+          the mapping with whoever owns the payments pipeline. Count the
+          unmapped remainder — it is never zero on the first pass.
+        gotchas: >
+          Only SEN can charge back. If the disposition is ambiguous, chargeback
+          rate denominators are wrong and every outcome feature is quietly
+          miscalibrated. Watch for pending/in-flight states that later change.
+
+      - id: decision_ts_features
+        what: Which fields were actually POPULATED at decision time
+        aliases: ["(not a column — a property of each column)"]
+        dtype: n/a
+        source_kind: derived
+        criticality: core
+        verify: >
+          For each field you bind, establish whether its value was known
+          pre-authorization or written afterwards. Compare a live scoring
+          payload against the warehouse row for the same txn_id.
+        gotchas: >
+          The single most productive source of accidental leakage. Warehouse
+          tables are enriched after the fact — a `device_trust_score` column may
+          be populated hours later. A field being present in the table says
+          nothing about it being available at 40ms pre-auth. Anything that fails
+          this check is a later-lifecycle feature, not a pre-auth one.
+
+  # -------------------------------------------------------------------
+  - id: instrument
+    name: Payment instrument
+    requirements:
+
+      - id: pan_token
+        what: Stable per-card token or PAN hash
+        aliases: [card_token, pan_token, card_hash, card_fingerprint, instrument_id,
+                  payment_method_id, card_id, token]
+        dtype: string
+        source_kind: transaction_record
+        criticality: core
+        unlocks_entities: [pan]
+        unlocks_measures: [d_pan]
+        verify: >
+          Must be stable for the SAME card across sessions, customers and
+          merchants. Check that a card used by two customers yields one token —
+          if tokens are minted per customer, cross-customer card reuse (a strong
+          fraud signal) is invisible.
+        gotchas: >
+          Network tokens rotate on reissue and per-merchant tokens do not join
+          across merchants. If only a per-merchant token exists, say so — card
+          velocity features are then merchant-scoped and much weaker.
+          BIN+last4+expiry is a workable proxy key if nothing better exists.
+
+      - id: bin
+        what: Bank identification number, 8 and 6 digit
+        aliases: [bin, iin, card_bin, bin6, bin8, first_six, first_eight]
+        dtype: string
+        source_kind: transaction_record
+        criticality: high
+        unlocks_entities: [bin8, bin6]
+        unlocks_measures: [d_bin8]
+        verify: Confirm digit length and zero-padding survived the ETL as a string.
+        gotchas: >
+          BIN6 is too coarse post-BIN-expansion — several issuers share a BIN6.
+          If only 6 digits are stored, bin8 entities are unbuildable and you
+          should raise it: the fix is upstream, not in the feature pipeline.
+          A numeric column silently drops leading zeros.
+
+      - id: bin_table
+        what: BIN reference data — issuer, country, funding type, product
+        aliases: [bin_table, bin_reference, iin_lookup, card_metadata, bin_enrichment]
+        dtype: table
+        source_kind: vendor_enrichment
+        criticality: high
+        unlocks_entities: [issuer]
+        unlocks_nongrid: [instrument]
+        verify: >
+          Check join coverage against live traffic — a stale table can miss
+          10-20% of current BINs. Measure the miss rate before relying on it.
+        gotchas: >
+          Prepaid vs credit vs debit funding type is one of the highest-value
+          single fields in this whole document and is frequently absent from
+          in-house BIN tables. Commercial-vs-consumer and issuer country tier
+          matter nearly as much.
+
+      - id: auth_response
+        what: Issuer response code, AVS, CVV and 3DS results
+        aliases: [response_code, decline_code, avs_result, avs_response, cvv_result,
+                  cvc_response, three_ds_status, eci, liability_shift, network_response]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: high
+        unlocks_measures: [err_lost_stln, err_dnh, retry_success, fail_then_ok]
+        unlocks_nongrid: [instrument]
+        verify: >
+          Confirm you have the RAW issuer code, not a bucketed internal status.
+          Lost/stolen must be separable from insufficient-funds.
+        gotchas: >
+          A lost/stolen decline on an entity is nearly a fraud label with a
+          ~1 day lag instead of 30 — it is both a feature and your fastest
+          proxy label. Losing it to a "declined" bucket is an expensive
+          simplification that has usually already happened upstream.
+
+  # -------------------------------------------------------------------
+  - id: device_network
+    name: Device and network
+    requirements:
+
+      - id: device_fp
+        what: Device fingerprint stable across sessions
+        aliases: [device_id, device_fingerprint, fingerprint, fp_hash, visitor_id,
+                  browser_id, client_id, device_token, ja3]
+        dtype: string
+        source_kind: transaction_record
+        criticality: high
+        unlocks_entities: [device]
+        unlocks_measures: [d_device]
+        unlocks_nongrid: [graph, novelty, deviation]
+        verify: >
+          Compare distinct devices to distinct sessions over a month. A ratio
+          near 1.0 means you have a session cookie, NOT a device fingerprint,
+          and cross-session linkage — the entire point — is absent.
+        gotchas: >
+          A per-session id looks identical in a schema browser and fails
+          silently: every device is new, novelty features fire constantly, and
+          the graph has no edges. This is the single most common bad bind in
+          this document. Verify before building anything device-keyed.
+
+      - id: device_attrs
+        what: Device model, OS, browser, locale, timezone, screen
+        aliases: [user_agent, ua, os, os_version, browser, browser_version, locale,
+                  language, timezone_offset, screen_resolution, device_model, platform]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_entities: [device_model, os_browser]
+        unlocks_nongrid: [consistency, biometrics]
+        verify: Confirm the raw user-agent is retained, not only a parsed summary.
+        gotchas: >
+          Device locale and timezone vs IP timezone is a cross-field consistency
+          check that costs nothing and catches proxied sessions.
+
+      - id: canvas_hash
+        what: Canvas / WebGL rendering fingerprint
+        aliases: [canvas_hash, webgl_hash, canvas_fp, gpu_hash, render_fingerprint]
+        dtype: string
+        source_kind: transaction_record
+        criticality: optional
+        unlocks_entities: [canvas]
+        verify: Present only if a client-side SDK collects it.
+        gotchas: >
+          Usually arrives with a device-intelligence vendor rather than
+          separately. If absent, this is a procurement decision, not something
+          the feature pipeline can recover.
+
+      - id: ip_address
+        what: Client IP address
+        aliases: [ip, ip_address, client_ip, remote_addr, source_ip, x_forwarded_for]
+        dtype: string
+        source_kind: transaction_record
+        criticality: high
+        unlocks_entities: [ip, ip24, ip16]
+        unlocks_measures: [d_ip24]
+        unlocks_nongrid: [graph, consistency]
+        verify: >
+          Check whether it is the true client IP or your load balancer's. If the
+          top few IPs carry a large share of traffic, you are looking at your own
+          infrastructure. Confirm IPv6 handling — /24 masking is IPv4 logic.
+        gotchas: >
+          Frequently truncated or dropped for privacy reasons. If retention is
+          short, entity history windows are capped by it — check the retention
+          period, not just the presence of the column.
+
+      - id: ip_intel
+        what: ASN, ISP, connection type, VPN/proxy/Tor flags, IP geolocation
+        aliases: [asn, as_number, isp, connection_type, is_vpn, is_proxy, is_datacenter,
+                  ip_country, ip_city, ip_lat, ip_lon, maxmind, ipinfo]
+        dtype: table
+        source_kind: vendor_enrichment
+        criticality: high
+        unlocks_entities: [asn]
+        unlocks_nongrid: [consistency, population]
+        verify: >
+          Confirm the enrichment is point-in-time (IP-to-ASN mappings change) or
+          accept that historical rows carry today's answer.
+        gotchas: >
+          Residential vs datacenter vs mobile is the highest-value bit here.
+          Re-enriching history with current mappings is itself a mild leak and
+          also a training/serving skew source — note which you have.
+
+  # -------------------------------------------------------------------
+  - id: contact
+    name: Email and phone
+    requirements:
+
+      - id: email_address
+        what: Raw email address as entered
+        aliases: [email, email_address, user_email, contact_email, buyer_email]
+        dtype: string
+        source_kind: transaction_record
+        criticality: high
+        unlocks_entities: [email, email_canon, email_dom]
+        unlocks_measures: [d_email]
+        unlocks_nongrid: [strings, graph, novelty]
+        verify: >
+          Confirm the RAW value is retained, not a lowercased/normalized one —
+          canonicalization (stripping dots and plus-tags) must be yours to do,
+          and the difference between raw and canonical is itself a signal.
+        gotchas: >
+          If hashed at rest, string and entropy features (local-part length,
+          digit ratio, keyboard walks, edit distance to nearest known email) are
+          all dead, and that is a whole family. Check for a hashed-only policy
+          before planning around it.
+
+      - id: email_intel
+        what: Email reputation — first-seen-in-the-wild, breach presence, domain age, MX
+        aliases: [email_score, emailage, email_risk, domain_age, mx_record, disposable_flag,
+                  free_provider_flag]
+        dtype: table
+        source_kind: vendor_enrichment
+        criticality: medium
+        unlocks_entities: [email_mx]
+        unlocks_nongrid: [strings, novelty]
+        verify: Check coverage rate on live traffic before designing around it.
+        gotchas: >
+          Aged-email-but-everything-else-new is a synthetic identity signature
+          and needs the external age, not your own first-seen date.
+
+      - id: phone_number
+        what: Phone number in E.164, plus line intelligence
+        aliases: [phone, phone_number, msisdn, mobile, contact_number, tel,
+                  line_type, carrier, ported_at]
+        dtype: string
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_entities: [phone]
+        unlocks_nongrid: [consistency]
+        verify: Confirm E.164 normalization, or you cannot derive country code reliably.
+        gotchas: >
+          Line type (VOIP vs mobile vs landline) and port-in recency are vendor
+          enrichment, not raw fields, and are what make phone predictive. The
+          raw number alone is a weak entity.
+
+  # -------------------------------------------------------------------
+  - id: identity
+    name: Identity and KYC
+    requirements:
+
+      - id: customer_id
+        what: Stable customer/account identifier
+        aliases: [customer_id, user_id, account_id, party_id, member_id, client_id]
+        dtype: string
+        source_kind: transaction_record
+        criticality: core
+        unlocks_entities: [cust]
+        unlocks_measures: [d_cust]
+        unlocks_nongrid: [deviation, novelty]
+        verify: >
+          Confirm it survives email or phone changes. An id that rotates on
+          profile edit destroys the customer-baseline family, which is the best
+          ATO detector you have.
+        gotchas: Guest checkout produces null or per-order ids — measure that share.
+
+      - id: kyc_identity
+        what: Name, DOB, national ID, birth country
+        aliases: [first_name, last_name, full_name, legal_name, date_of_birth, dob,
+                  national_id, ssn_hash, tax_id, nationality, country_of_birth]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_entities: [name_norm, dob, dob_surname, natid, birth_country]
+        unlocks_nongrid: [consistency, strings]
+        verify: Confirm access is permitted for modelling under your privacy policy.
+        gotchas: >
+          Name and DOB features carry disparate-impact exposure. Do not bind
+          these without knowing who signs off — see the fairness protocol gap in
+          AGENT_BRIEF.md.
+
+      - id: kyc_document
+        what: Document number, type, issuing authority, capture metadata
+        aliases: [document_id, doc_number, passport_number, id_document, doc_type,
+                  issuing_country, issuing_authority, nfc_read, liveness_score,
+                  tamper_score, doc_expiry]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_entities: [doc, doc_auth]
+        unlocks_nongrid: [consistency, novelty]
+        verify: >
+          The high-value derived signal is document-number REUSE COUNT across
+          distinct customers. Confirm you can compute it.
+        gotchas: >
+          NFC-chip read vs photo capture, and liveness/tamper scores, are
+          strong synthetic-identity signals and usually sit in the KYC vendor's
+          response payload rather than your customer table.
+
+  # -------------------------------------------------------------------
+  - id: geography
+    name: Addresses and geography
+    requirements:
+
+      - id: addresses
+        what: Billing and shipping/payout addresses
+        aliases: [billing_address, bill_addr, shipping_address, ship_addr, address_line1,
+                  postcode, postal_code, zip, city, country_code, delivery_address]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: high
+        unlocks_entities: [addr_bill, addr_ship, postcode]
+        unlocks_measures: [d_country]
+        unlocks_nongrid: [consistency, graph]
+        verify: >
+          Confirm line-1 is retained. Unit-number cycling on one drop address
+          is only visible if you can hash line-1 separately from the full string.
+        gotchas: >
+          Raw addresses need normalization before they work as entity keys —
+          "12 Main St." and "12 Main Street" must collapse. That is a build
+          item, listed under derived_assets below.
+
+      - id: geocoding
+        what: Lat/lon for addresses, for distance and geohash features
+        aliases: [latitude, longitude, lat, lon, geohash, geo_point, coordinates]
+        dtype: numeric
+        source_kind: vendor_enrichment
+        criticality: medium
+        unlocks_entities: [geohash5]
+        unlocks_nongrid: [consistency, deviation]
+        verify: Check the geocoder's fallback behaviour — many return a country centroid.
+        gotchas: >
+          Centroid fallbacks make impossible-travel velocity features fire
+          constantly and falsely. Keep the precision/confidence field.
+
+  # -------------------------------------------------------------------
+  - id: counterparty
+    name: Counterparty and payout corridor
+    note: >
+      Given the SEN/receiver-country funnel this looks like remittance or
+      marketplace payout. These are usually the strongest features nobody
+      builds — treat a gap here as high priority, not exotic.
+    requirements:
+
+      - id: receiver_identity
+        what: Receiver/payee id, payout account or IBAN, receiver bank and country
+        aliases: [receiver_id, payee_id, beneficiary_id, recipient_id, payout_account,
+                  iban, wallet_address, beneficiary_account, receiving_bank, swift, bic,
+                  destination_country, receive_country]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: high
+        unlocks_entities: [receiver, recv_acct, recv_bank, recv_country, corridor, send_recv]
+        unlocks_measures: [d_receiver, d_sender]
+        unlocks_nongrid: [graph]
+        verify: >
+          Confirm the receiver id is stable across senders. If it is scoped per
+          sender, receiver FAN-IN — many senders to one receiver, your primary
+          mule detector — cannot be computed at all.
+        gotchas: >
+          `d_sender` on a receiver key is the highest-value mule feature in the
+          catalog and depends entirely on this being a shared key.
+
+      - id: payout_method
+        what: Payout rail — bank transfer, wallet, cash pickup, card push
+        aliases: [payout_method, disbursement_type, payout_type, rail, delivery_method,
+                  payment_method]
+        dtype: enum
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_nongrid: [population]
+        verify: Enumerate distinct values and confirm risk differs across them.
+        gotchas: >
+          Cash pickup and wallet rails carry materially different mule risk than
+          bank transfer. Noted as a coverage gap in the entity registry — worth
+          adding as an entity if this field exists.
+
+  # -------------------------------------------------------------------
+  - id: merchant
+    name: Merchant side
+    note: Applicable if you are a PSP, marketplace or acquirer. Skip if single-merchant.
+    requirements:
+
+      - id: merchant_identity
+        what: Merchant id, MCC, tenure
+        aliases: [merchant_id, seller_id, sub_merchant_id, mcc, merchant_category_code,
+                  category, onboarded_at, merchant_since]
+        dtype: string (several)
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_entities: [merchant, mcc]
+        unlocks_measures: [d_mcc]
+        verify: Confirm MCC is the network value, not an internal taxonomy.
+        gotchas: >
+          Merchant tenure bucket is a coverage gap in the current entity
+          registry. If `onboarded_at` exists, flag it — new-merchant risk is a
+          distinct phenomenon.
+
+  # -------------------------------------------------------------------
+  - id: outcomes
+    name: Outcome and label feeds
+    note: >
+      Each of these carries its own arrival clock. Bind label_arrival_ts
+      per feed, not once globally — maturity differs by feed.
+    requirements:
+
+      - id: chargeback_feed
+        what: Disputes with reason codes, amounts, and both clocks
+        aliases: [chargeback, dispute, cb, retrieval_request, case, claim,
+                  reason_code, dispute_reason, dispute_amount, dispute_date]
+        dtype: table
+        source_kind: label_feed
+        criticality: core
+        unlocks_measures: [cb_rate, cb_fraud_rate, cb_nonfr_rate, cb_amt, cb_lag_days]
+        verify: >
+          Confirm reason codes are the RAW network codes and that you can map
+          them to fraud vs non-fraud groups per docs/label_definition.md. Check
+          how representments, partial disputes and second presentments are
+          represented — each is a fork in the label.
+        gotchas: >
+          If dispute rows are mutated in place, arrival history is gone. See
+          label_arrival_ts. Also confirm whether a won representment flips the
+          label back — that decision must match between features and training.
+
+      - id: tc40_safe
+        what: Issuer fraud alert feed (TC40 / SAFE)
+        aliases: [tc40, safe, issuer_fraud_alert, fraud_alert, network_alert, ethoca,
+                  verifi, cdrn, rdr]
+        dtype: table
+        source_kind: label_feed
+        criticality: high
+        unlocks_measures: [tc40_rate]
+        verify: Confirm you receive it directly or via your acquirer; check the lag.
+        gotchas: >
+          Doubles as a fast proxy label at ~7 days maturity versus 30 for
+          chargebacks. High lift-per-integration-effort — if it is not being
+          consumed, that is a finding worth escalating on its own.
+
+      - id: refunds_reviews
+        what: Refunds, manual-review dispositions, rule-engine denials
+        aliases: [refund, credit, reversal, void, review_decision, analyst_decision,
+                  queue_outcome, rule_id, triggered_rules, denial_reason]
+        dtype: table
+        source_kind: label_feed
+        criticality: medium
+        unlocks_measures: [refund_rate, review_conf, den_by_rule]
+        verify: Confirm rule ids are stable over time or the by-rule split is meaningless.
+        gotchas: >
+          Manual-review outcomes are biased to the reviewed population; they
+          need propensity weights, not raw use.
+
+  # -------------------------------------------------------------------
+  - id: policy
+    name: Model and policy telemetry
+    note: >
+      Required for the censoring correction. Without these, entity outcome
+      rates silently encode current policy and the challenger relearns the
+      champion's blind spots.
+    requirements:
+
+      - id: champion_score
+        what: The production model's score and decision for each transaction
+        aliases: [model_score, risk_score, fraud_score, score, decision, action,
+                  blocked, model_version]
+        dtype: numeric + enum
+        source_kind: transaction_record
+        criticality: high
+        unlocks_measures: [champ_score, block_rate, rule_hits]
+        verify: >
+          Confirm the score is LOGGED AT DECISION TIME, not recomputed later.
+          A recomputed score is leakage and will look excellent in backtest.
+        gotchas: >
+          Model version must be logged alongside; a score column spanning
+          several champion versions is not one variable.
+
+      - id: release_log
+        what: Champion-blocked transactions sampled and released, with sample weights
+        aliases: [release_program, holdout, bypass, forced_approve, champion_override,
+                  sample_weight, control_group, exploration_log]
+        dtype: table
+        source_kind: label_feed
+        criticality: high
+        verify: >
+          Confirm a release program exists and find its rate. If none exists,
+          this is the highest-priority finding in the whole discovery: entity
+          outcome rates cannot be de-biased in the blocked region at all.
+        gotchas: >
+          Referenced as `release_log` by pit_aggregate_template.sql. The
+          reject-inference method is still unspecified — see the
+          "Not yet written" section of AGENT_BRIEF.md. Bring the release rate
+          back regardless; it bounds what any method can do.
+
+  # -------------------------------------------------------------------
+  - id: event_streams
+    name: Event streams beyond the transaction
+    note: >
+      The ordered event stream before a transaction is richer than the
+      transaction itself. Credential-change recency in particular is the
+      strongest single ATO feature most teams lack.
+    requirements:
+
+      - id: account_events
+        what: Password, email, phone and address change events with timestamps
+        aliases: [account_events, user_events, profile_changes, audit_log, change_log,
+                  credential_change, password_reset, email_change, security_events]
+        dtype: event stream
+        source_kind: event_stream
+        criticality: high
+        unlocks_nongrid: [sequence, novelty]
+        verify: >
+          Confirm timestamps and that the stream joins to customer_id. Check
+          retention — 90 days is common and caps your longest window.
+        gotchas: >
+          Usually owned by the identity or platform team, not payments, and
+          therefore routinely missed in a payments-scoped discovery. Ask
+          explicitly. Highest lift-per-integration-effort item in this file.
+
+      - id: session_events
+        what: Login, navigation, checkout funnel, cart edits, failed logins
+        aliases: [session, clickstream, page_views, events, funnel, login_attempts,
+                  failed_login, cart_events, checkout_events, segment, amplitude]
+        dtype: event stream
+        source_kind: event_stream
+        criticality: medium
+        unlocks_nongrid: [sequence]
+        verify: Confirm the session id joins to the transaction record.
+        gotchas: >
+          Analytics warehouses often sample clickstream. Sampled data is
+          unusable for per-transaction features — check the sampling rate before
+          designing around it.
+
+      - id: attribution
+        what: Acquisition channel, campaign, affiliate
+        aliases: [utm_source, utm_campaign, channel, referrer, affiliate_id,
+                  partner_id, attribution, source, medium]
+        dtype: string
+        source_kind: event_stream
+        criticality: medium
+        unlocks_nongrid: [sequence, population]
+        verify: Confirm it is retained per transaction, not only at signup.
+        gotchas: >
+          Fraud concentrates hard by campaign and affiliate. Wildly underused
+          and usually already collected by marketing — a cheap win.
+
+      - id: auth_history
+        what: Prior authorization attempts including declines, in-session
+        aliases: [auth_log, attempts, retries, decline_history, authorization_attempts]
+        dtype: event stream
+        source_kind: event_stream
+        criticality: medium
+        unlocks_measures: [fail_then_ok, retry_success, interarrival]
+        verify: Confirm failed attempts are retained, not only successful ones.
+        gotchas: >
+          Many pipelines keep only approved transactions. Card testing is almost
+          entirely visible in the declines — dropping them removes the typology.
+
+  # -------------------------------------------------------------------
+  - id: fulfillment
+    name: Basket and fulfillment
+    note: >
+      Mostly POST-authorization. The model here scores pre-auth, so these
+      cannot be features for it — but delivery confirmation and dispute
+      history are the friendly-fraud predictors, and friendly fraud is the
+      thinnest typology in the catalog. Record what exists; it argues for a
+      second model scoring later in the lifecycle.
+    requirements:
+
+      - id: basket
+        what: Line items, categories, quantities, shipping method and cost
+        aliases: [line_items, order_items, sku, product_category, quantity,
+                  shipping_method, shipping_cost, expedited, gift_message]
+        dtype: table
+        source_kind: transaction_record
+        criticality: medium
+        unlocks_nongrid: [basket]
+        verify: Confirm availability pre-authorization, which is usually true for basket.
+        gotchas: Resale liquidity of the goods is a derived attribute you will have to build.
+
+      - id: delivery
+        what: Delivery confirmation, address type, freight-forwarder match
+        aliases: [tracking, delivery_status, delivered_at, carrier, address_type,
+                  residential_flag, po_box, freight_forwarder, reshipper]
+        dtype: table
+        source_kind: event_stream
+        criticality: optional
+        unlocks_nongrid: [basket]
+        verify: Confirm timestamps to establish what is known pre-auth (usually nothing).
+        gotchas: >
+          POST-TRANSACTION. Enormously predictive of friendly-fraud disputes and
+          unusable for a pre-auth model. Do not bind it as a pre-auth feature;
+          record it as the seed of a later-lifecycle model.
+
+      - id: support_history
+        what: Customer-support contacts and prior dispute history
+        aliases: [tickets, cases, contacts, zendesk, support_history, prior_disputes,
+                  dispute_count]
+        dtype: table
+        source_kind: event_stream
+        criticality: medium
+        unlocks_nongrid: [basket, population]
+        verify: Confirm prior-dispute counts are computable point-in-time.
+        gotchas: >
+          Prior dispute count and customer tenure are the friendly-fraud
+          predictors that DO work pre-auth. Given how thin that typology is in
+          the catalog, this is a priority despite the modest criticality.
+
+  # -------------------------------------------------------------------
+  - id: derived_assets
+    name: Things you must build, not find
+    note: >
+      These do not exist as a column anywhere. They are the prerequisites the
+      search assumes; each is a build item with an owner and an estimate.
+    requirements:
+
+      - id: first_seen_table
+        what: First-seen timestamp per entity value, point-in-time correct
+        aliases: ["(build it)"]
+        dtype: table
+        source_kind: derived
+        criticality: high
+        unlocks_nongrid: [novelty]
+        verify: >
+          Must be as-of correct: the first-seen date for an entity queried at
+          time T must reflect only events known by T.
+        gotchas: >
+          Trivially easy to build with a leak — a MIN(event_ts) GROUP BY over
+          the full table gives every row the benefit of hindsight. Whole novelty
+          family depends on getting this right.
+
+      - id: entity_graph
+        what: Multipartite graph over card, device, email, IP, address, phone, receiver
+        aliases: ["(build it)"]
+        dtype: graph
+        source_kind: derived
+        criticality: high
+        unlocks_entities: [comp2]
+        unlocks_nongrid: [graph]
+        verify: >
+          Component ids must be computed as-of scoring time. Label propagation
+          across the graph must filter on label_arrival_ts like everything else.
+        gotchas: >
+          Ring fraud is invisible to per-entity aggregates and glaring here, so
+          it is worth the build. But 2-hop centrality inside a 40ms pre-auth
+          budget is its own project — component id and 1-hop fraud counts are
+          the realistic pre-auth subset.
+
+      - id: address_normalization
+        what: Address standardization plus freight-forwarder/reshipper lists
+        aliases: [address_normalization, address_standardization, libpostal, smarty,
+                  loqate, reshipper_list]
+        dtype: service
+        source_kind: derived
+        criticality: medium
+        unlocks_entities: [addr_bill, addr_ship]
+        verify: Check collapse rate on known-duplicate addresses.
+        gotchas: Without it, address entities fragment and every address feature is diluted.
+
+      - id: serving_parity_harness
+        what: Shadow-computed vs offline-recomputed feature values on the same transactions
+        aliases: [shadow_features, offline_features, feature_store, parity_check]
+        dtype: table
+        source_kind: derived
+        criticality: high
+        verify: >
+          Referenced as `shadow_features` and `offline_features` by
+          pit_aggregate_template.sql. The diff between them IS your
+          training/serving skew metric.
+        gotchas: >
+          Must exist before any backtest number is reported, not after. A
+          feature store that mutates history in place makes parity
+          unmeasurable — check for point-in-time correctness support.

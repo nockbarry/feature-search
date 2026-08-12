@@ -12,6 +12,7 @@ Built for a pre-authorization block/pass decision over a `SEN` / `DEN` / `ERR` /
 
 ```bash
 make install          # runtime + dev deps
+make checklist        # DISCOVERY_CHECKLIST.md — what to find in your warehouse
 make pack             # pack/ — the model-facing context pack
 make workbook         # feature_catalog.xlsx — the human fill-in surface
 make check            # validate + tests + lint
@@ -32,6 +33,8 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 |---|---|
 | `AGENT_BRIEF.md` | **Start here.** Mission, grammar, correctness rules, pruning funnel, definition of done. |
 | `feature_space.yaml` | Source of truth: six slot registries, resolution ladder, labels, typologies. **Edit this.** |
+| `spec/data_requirements.yaml` | **What to look for inside the company.** 42 requirements: aliases to search the catalog for, how to verify a match, what breaks without it. |
+| `discover.py` | Renders the checklist; takes a filled binding and reports which entities, measures and families it unlocks. |
 | `validate.py` | Schema and invariant checks on the YAML. Runs before every expansion. |
 | `expand_catalog.py` | Expands the YAML into `candidates.csv`. Flags: `--level`, `--max-tier`, `--expand`, `--survivors`. |
 | `nongrid_features.py` | 143 hand-enumerated features the grammar cannot express. Expected to carry most of the lift. |
@@ -45,6 +48,29 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 | `tests/` | Compatibility rules, naming contract, determinism, spec validation, and the leakage fixtures. |
 
 **`candidates.csv`, `feature_catalog.xlsx` and `pack/` are build artifacts.** They are gitignored and CI fails if either is committed. Edit the YAML and regenerate.
+
+---
+
+## Before the search: bind the inputs
+
+The catalog says what the search wants. `spec/data_requirements.yaml` says what has
+to exist in your warehouse for any of it to be buildable — 42 requirements, each with
+the names it appears under in real systems, a verification step that separates a real
+match from a lookalike, and what dies without it.
+
+```bash
+make checklist                                  # DISCOVERY_CHECKLIST.md
+python discover.py --template > binding.yaml    # skeleton to fill in as you search
+python discover.py --binding binding.yaml       # what your findings unlock
+```
+
+Every requirement is recorded **found** / **absent** / **unknown**. Absent and unknown
+are different answers — one is a design constraint, the other is work outstanding —
+and a `found` that has not passed its verify step does not count toward coverage.
+
+The coverage report is what makes stage 1 of the pruning funnel runnable: it turns
+"which features are available?" from a guess into a computed set. Missing core
+requirements exit non-zero, because the search genuinely cannot start without them.
 
 ---
 
@@ -103,11 +129,13 @@ Why coarsening is safe: for nested count windows under a Poisson arrival process
 make test
 ```
 
-71 tests. The ones that matter:
+85 tests. The ones that matter:
 
 - `test_pit_leakage.py` — every expected value hand-computed from the fixture and stated in the test docstring. Checks against ground truth, not against last week's output.
 - `test_compatibility.py::test_coverage_is_never_gated_by_resolution` — enforces the contract that resolution rungs prune windows and sibling granularities but never remove a measure or an entity class.
 - `test_validate.py` — every check is proven to reject a specific known-bad spec, so the validator cannot pass everything and be mistaken for coverage.
+- `test_discover.py::test_every_registry_id_is_reachable` — every entity, measure and family must be unlocked by some requirement, or the checklist can read as complete while part of the search stays unbuildable. It found two such holes on first run.
+- `test_discover.py::test_unverified_find_does_not_count` — a `found` that skipped its verify step must leave the entity blocked. The canonical case is a per-session cookie bound as a device fingerprint.
 - `test_pack.py::test_every_dropped_column_round_trips` — the pack drops 13 queue columns claiming they are recoverable from `feature_name`; this decodes all 1,167 rows and checks every one, so the trim is verified rather than asserted.
 - `test_determinism.py` — regeneration must be byte-identical, or diffs become unreadable and the agent's fills can no longer be matched to their features.
 

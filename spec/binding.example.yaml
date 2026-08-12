@@ -1,0 +1,120 @@
+# Binding — WORKED EXAMPLE, not a real company's schema.
+#
+# Shows the three statuses in use and what each buys you. Generate your own
+# skeleton with `python discover.py --template > binding.yaml`, then:
+#
+#   python discover.py --binding binding.yaml
+#
+# The example is deliberately incomplete and deliberately imperfect: it has a
+# core requirement absent (label_arrival_ts), a found-but-unverified device
+# fingerprint, and a block of unknowns. That is what a real discovery looks
+# like halfway through, and the report is most useful in exactly that state.
+
+bindings:
+
+  # ---- core transaction record ----
+  txn_id:
+    status: found
+    source: warehouse.payments.authorization.auth_id
+    verified: true
+    notes: >
+      One row per attempt; 1.31 attempts per order, so this is attempt-level
+      rather than order-level. order_id also exists and is NOT this.
+
+  event_ts:
+    status: found
+    source: warehouse.payments.authorization.decision_ts
+    verified: true
+    notes: >
+      UTC, stamped by the decision service. created_at on the orders table
+      lags it by up to 400ms and is the wrong field.
+
+  label_arrival_ts:
+    status: absent
+    source: null
+    verified: false
+    notes: >
+      BLOCKING. Dispute rows are updated in place; only current state survives.
+      Escalated — CDC on the disputes table would reconstruct it going forward
+      but not historically. Until then no outcome-rate feature is verifiable
+      and the two-clock rule cannot be enforced.
+
+  amount:
+    status: found
+    source: warehouse.payments.authorization.amount_minor + currency_code
+    verified: true
+    notes: Minor units. amount_usd exists but is converted at settlement rate, not decision.
+
+  disposition:
+    status: found
+    source: warehouse.payments.authorization.status
+    verified: true
+    notes: >
+      11 distinct values mapped to SEN/DEN/ERR; 2 pending states excluded from
+      denominators pending a decision from the payments team.
+
+  decision_ts_features:
+    status: unknown
+    source: null
+    verified: false
+    notes: Live payload capture requested; comparison against warehouse rows not yet run.
+
+  pan_token:
+    status: found
+    source: warehouse.payments.instrument.card_fingerprint
+    verified: true
+    notes: Stable across customers — a card used by 3 customers yields 1 fingerprint. Good.
+
+  customer_id:
+    status: found
+    source: warehouse.core.customer.customer_id
+    verified: true
+    notes: Survives email and phone change. 6% of volume is guest checkout with null.
+
+  chargeback_feed:
+    status: found
+    source: warehouse.risk.dispute
+    verified: true
+    notes: Raw network reason codes present. Representment outcome in a separate table.
+
+  # ---- device: the classic bad bind, caught by verification ----
+  device_fp:
+    status: found
+    source: warehouse.web.session.device_id
+    verified: false
+    notes: >
+      NOT YET COUNTED. distinct(device_id) / distinct(session_id) = 0.98 over
+      30 days, which means this is a per-session cookie and not a device
+      fingerprint. Cross-session linkage absent. Do not build device features
+      on it — flagged to the platform team.
+
+  # ---- everything else still to check ----
+  bin:
+    status: found
+    source: warehouse.payments.instrument.bin8
+    verified: true
+    notes: 8 digits, stored as string, leading zeros intact.
+
+  auth_response:
+    status: found
+    source: warehouse.payments.authorization.network_response_code
+    verified: true
+    notes: >
+      Raw issuer codes retained. Lost/stolen separable — this is also the
+      fastest proxy label available given label_arrival_ts is absent.
+
+  release_log:
+    status: absent
+    source: null
+    verified: false
+    notes: >
+      No release program exists. Champion blocks ~4.2% of dollar volume with no
+      sampled release, so entity outcome rates cannot be de-biased in the
+      blocked region by any method. Highest-priority finding after
+      label_arrival_ts.
+
+  account_events:
+    status: unknown
+    source: null
+    verified: false
+    notes: Owned by the identity team, not payments. Meeting scheduled.

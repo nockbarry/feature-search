@@ -7,7 +7,7 @@ LEVEL ?= L0
 PY    ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install validate catalog expand workbook pack test lint check clean all
+.PHONY: help install validate checklist catalog expand workbook pack test lint check clean all
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -20,6 +20,9 @@ install:  ## Install runtime + dev dependencies
 
 validate:  ## Schema + invariant checks on feature_space.yaml
 	$(PY) validate.py
+
+checklist:  ## Regenerate DISCOVERY_CHECKLIST.md from spec/data_requirements.yaml
+	$(PY) discover.py --checklist
 
 catalog: validate  ## Expand the YAML into candidates.csv at $(LEVEL)
 	$(PY) expand_catalog.py --level $(LEVEL)
@@ -40,7 +43,7 @@ test:  ## Run the test suite
 lint:  ## Static checks
 	$(PY) -m ruff check .
 
-check: validate test lint  ## Everything CI runs
+check: validate checklist test lint  ## Everything CI runs
 	@echo "ok — determinism is asserted by tests/test_determinism.py"
 
 clean:  ## Remove build artifacts

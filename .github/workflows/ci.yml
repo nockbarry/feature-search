@@ -27,6 +27,12 @@ jobs:
       - name: Validate spec
         run: python validate.py
 
+      - name: Discovery checklist is current
+        run: |
+          python discover.py --checklist
+          git diff --exit-code DISCOVERY_CHECKLIST.md \
+            || { echo "::error::DISCOVERY_CHECKLIST.md is stale — run 'make checklist'"; exit 1; }
+
       - name: Lint
         run: python -m ruff check .
 

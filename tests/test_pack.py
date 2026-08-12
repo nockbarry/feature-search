@@ -22,7 +22,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from expand_catalog import build_entities  # noqa: E402
-from pack import CORRECTNESS_FILES, DROPPED, QUEUE_KEEP, SPEC_FILES, build, decode  # noqa: E402
+from pack import (  # noqa: E402
+    CORRECTNESS_FILES,
+    DISCOVERY_FILES,
+    DROPPED,
+    QUEUE_KEEP,
+    SPEC_FILES,
+    build,
+    decode,
+)
 
 CANDIDATES = os.path.join(ROOT, "candidates.csv")
 
@@ -85,10 +93,33 @@ def test_decode_rejects_malformed_names(spec, catalog):
 
 
 def test_pack_contains_every_declared_file(packed):
-    for name, _ in SPEC_FILES + CORRECTNESS_FILES:
-        assert (packed / os.path.basename(name)).exists(), f"{name} missing from pack"
+    for name, _ in DISCOVERY_FILES + SPEC_FILES + CORRECTNESS_FILES:
+        rel = name if name.startswith("spec/") else os.path.basename(name)
+        assert (packed / rel).exists(), f"{name} missing from pack"
     assert (packed / "queue.csv").exists()
     assert (packed / "MANIFEST.md").exists()
+
+
+def test_discovery_runs_standalone_from_the_pack(packed):
+    """
+    The agent's first job is binding inputs, so the discovery tooling has to work
+    where the pack is unzipped. discover.py resolves both spec/data_requirements.yaml
+    and feature_space.yaml relative to itself; the pack flattens one and preserves
+    the other, which is exactly the kind of thing that breaks silently.
+    """
+    r = subprocess.run([sys.executable, "discover.py", "--binding",
+                        "spec/binding.example.yaml"],
+                       cwd=packed, capture_output=True, text=True)
+    assert "DISCOVERY COVERAGE" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 1, "the example binding is meant to report as blocking"
+
+
+def test_manifest_puts_discovery_before_the_queue(packed):
+    """Screening the queue before binding inputs is wasted work; read order
+    must say so."""
+    text = (packed / "MANIFEST.md").read_text()
+    assert text.index("DISCOVERY_CHECKLIST.md") < text.index("queue.csv")
+    assert "Do not guess column names" in text
 
 
 def test_pack_excludes_the_pipeline_and_the_workbook(packed):

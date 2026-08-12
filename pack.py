@@ -53,6 +53,15 @@ SPEC_FILES = [
     ("docs/label_definition.md", "Reason-code mapping and dispute-lifecycle edge cases."),
 ]
 
+# The discovery step comes BEFORE the search: nothing in the queue is screenable
+# until the inputs are bound to real columns. These ship with the pack.
+DISCOVERY_FILES = [
+    ("DISCOVERY_CHECKLIST.md", "START HERE. What to look for in the company's data, what it is called, how to verify a match."),
+    ("spec/data_requirements.yaml", "The machine-readable source of the checklist. Feeds the coverage report."),
+    ("spec/binding.example.yaml", "A worked, deliberately incomplete binding. Copy the shape, not the values."),
+    ("discover.py", "`--template` for a binding skeleton; `--binding f.yaml` reports what your findings unlock."),
+]
+
 CORRECTNESS_FILES = [
     ("pit_aggregate_template.sql", "Warehouse implementation of the two-clock rule, shrinkage, censoring correction."),
     ("pit_reference.py", "The same logic in dependency-free Python. Executable spec."),
@@ -125,11 +134,13 @@ def manifest(level, rows, sizes, constants):
         "",
     ]
     n = 1
-    for group, files in (("Specification", SPEC_FILES), ("Correctness", CORRECTNESS_FILES)):
+    for group, files in (("Discovery — do this first", DISCOVERY_FILES),
+                         ("Specification", SPEC_FILES),
+                         ("Correctness", CORRECTNESS_FILES)):
         lines.append(f"**{group}**")
         lines.append("")
         for name, why in files:
-            base = os.path.basename(name)
+            base = name if name.startswith("spec/") else os.path.basename(name)
             lines.append(f"{n}. `{base}` — {why}")
             n += 1
         lines.append("")
@@ -173,14 +184,36 @@ def manifest(level, rows, sizes, constants):
         "and guard this pack; they are not inputs to the search. `feature_catalog.xlsx` is",
         "the human fill-in surface — use `queue.csv` instead.",
         "",
-        "## Known gaps",
+        "## Before you screen anything: bind the inputs",
         "",
-        "No schema binding exists yet: the SQL template names `txn`, `chargeback`,",
+        "No schema binding exists yet. The SQL template names `txn`, `chargeback`,",
         "`release_log`, `approved_traffic`, `v_label_arrival`, `v_parent_rate_pit`,",
         "`shadow_features`, `offline_features` and `date_spine`, and no entity id is mapped",
-        "to a warehouse column. Do not guess column names — stop and ask. Reject-inference",
-        "method and the cost-sensitive objective are also unspecified; see the",
-        "\"Not yet written\" section of `AGENT_BRIEF.md`.",
+        "to a warehouse column. **Do not guess column names.** A wrong bind does not error,",
+        "it produces confident nonsense.",
+        "",
+        "Work `DISCOVERY_CHECKLIST.md` first — 42 requirements, each with the names it",
+        "appears under in real systems and a verification step that separates a real match",
+        "from a lookalike. Then:",
+        "",
+        "```bash",
+        "python discover.py --template > binding.yaml   # skeleton",
+        "# ... fill it in as you search ...",
+        "python discover.py --binding binding.yaml      # what your findings unlock",
+        "```",
+        "",
+        "Record every requirement as `found` / `absent` / `unknown`. Absent and unknown",
+        "are different answers with different consequences and must never be merged.",
+        "A `found` that has not passed its verify step does not count.",
+        "",
+        "Stage 1 of the pruning funnel is availability, and it cannot run until this is",
+        "done. The coverage report tells you which entities, measures and non-grid",
+        "families are buildable — that is your real starting queue, not the full 1,167.",
+        "",
+        "## Other known gaps",
+        "",
+        "Reject-inference method and the cost-sensitive objective are unspecified; see",
+        "the \"Not yet written\" section of `AGENT_BRIEF.md`.",
         "",
     ]
     return "\n".join(lines)
@@ -224,11 +257,15 @@ def build(level="L0", out="pack", candidates="candidates.csv", spec_path="featur
     os.makedirs(outdir)
 
     sizes = {}
-    for name, _ in SPEC_FILES + CORRECTNESS_FILES:
+    # spec/ paths are preserved so discover.py finds data_requirements.yaml
+    # where it expects it; everything else flattens.
+    for name, _ in DISCOVERY_FILES + SPEC_FILES + CORRECTNESS_FILES:
         src = os.path.join(ROOT, name)
-        dst = os.path.join(outdir, os.path.basename(name))
+        rel = name if name.startswith("spec/") else os.path.basename(name)
+        dst = os.path.join(outdir, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
-        sizes[os.path.basename(name)] = os.path.getsize(dst)
+        sizes[rel] = os.path.getsize(dst)
 
     qpath = os.path.join(outdir, "queue.csv")
     with open(qpath, "w", newline="") as f:
@@ -246,7 +283,8 @@ def build(level="L0", out="pack", candidates="candidates.csv", spec_path="featur
         f.write(manifest(level, len(rows), sizes, constants))
 
     full = os.path.getsize(cpath) + sum(
-        os.path.getsize(os.path.join(ROOT, n)) for n, _ in SPEC_FILES + CORRECTNESS_FILES)
+        os.path.getsize(os.path.join(ROOT, n))
+        for n, _ in DISCOVERY_FILES + SPEC_FILES + CORRECTNESS_FILES)
     packed = sum(sizes.values()) + os.path.getsize(mpath)
     print(f"wrote {outdir}/ — {len(rows)} candidates, {len(sizes) + 1} files")
     print(f"  ~{packed / 4000:.0f}k tokens (queue ~{sizes['queue.csv'] / 4000:.0f}k), "
