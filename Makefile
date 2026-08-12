@@ -3,11 +3,12 @@
 # The YAML is the source of truth. candidates.csv and feature_catalog.xlsx are
 # BUILD ARTIFACTS: never hand-edit them, never commit them.
 
-LEVEL ?= L0
-PY    ?= python
+LEVEL    ?= L0
+SHARD_BY ?= entity_id
+PY       ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install validate checklist catalog expand workbook pack accept test lint check clean all
+.PHONY: help install validate checklist catalog expand workbook pack shards accept test lint check clean all
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -36,6 +37,9 @@ workbook: catalog  ## Rebuild feature_catalog.xlsx (human fill-in surface)
 
 pack: catalog  ## Assemble pack/ — the model-facing context pack
 	$(PY) pack.py --level $(LEVEL)
+
+shards: catalog  ## Split the queue into self-contained per-worker packets
+	$(PY) shard.py --by $(SHARD_BY)
 
 accept:  ## Validate a filled queue: make accept QUEUE=path/to/queue.csv
 	@test -n "$(QUEUE)" || { echo "usage: make accept QUEUE=path/to/filled_queue.csv"; exit 1; }

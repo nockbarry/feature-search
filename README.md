@@ -36,6 +36,7 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 | `spec/data_requirements.yaml` | **What to look for inside the company.** 42 requirements: aliases to search the catalog for, how to verify a match, what breaks without it. |
 | `discover.py` | Renders the checklist; takes a filled binding and reports which entities, measures and families it unlocks. |
 | `validate.py` | Schema and invariant checks on the YAML. Runs before every expansion. |
+| `shard.py` | Splits the queue into self-contained per-worker packets. `make shards` |
 | `validate_queue.py` | Checks what the **agent wrote back**: that the evidence each row claims actually exists. `make accept QUEUE=...` |
 | `expand_catalog.py` | Expands the YAML into `candidates.csv`. Flags: `--level`, `--max-tier`, `--expand`, `--survivors`. |
 | `nongrid_features.py` | 143 hand-enumerated features the grammar cannot express. Expected to carry most of the lift. |
@@ -72,6 +73,34 @@ and a `found` that has not passed its verify step does not count toward coverage
 The coverage report is what makes stage 1 of the pruning funnel runnable: it turns
 "which features are available?" from a guess into a computed set. Missing core
 requirements exit non-zero, because the search genuinely cannot start without them.
+
+---
+
+## Two handover shapes: planner vs workers
+
+They are not the same artifact and should not be confused.
+
+**`make pack` → `pack/`** is for the **planner**: the full specification, the
+discovery layer, the correctness files and the whole queue. ~90k tokens. This is
+what reasons about scope, decides what to bind, and owns the cross-shard stages.
+
+**`make shards` → `shards/`** is for the **workers**: 27 self-contained packets,
+one per entity, **~3k tokens each**. Each carries its own `TASK.md` restating the
+two-clock rule, the anti-fabrication contract, the status vocabulary, the per-row
+procedure and five worked examples verbatim — plus only its own ~44 rows.
+
+Sharding is by entity, not by row range, and the reason is arithmetic: 1,167 rows
+sit over just **54 distinct (entity, window) panels**, a 21.6:1 ratio. Shard by row
+range and up to 21 workers rebuild the same aggregate panel independently. Shard by
+entity and each panel is built once, by the worker that needs it — and the shards
+come out naturally even (35–44 rows), so no balancing is required.
+
+**What a shard cannot do.** Stages 6, 7 and 9 — redundancy clustering,
+multivariate selection, operating-point re-ranking — compare features against each
+other and are meaningless inside one shard. Every task card says so, and says to
+leave `shap_rank` empty and return `screened`. The coordinator owns those stages
+after all shards return. A `shipped` written by a shard worker is wrong by
+construction.
 
 ---
 
@@ -130,11 +159,13 @@ Why coarsening is safe: for nested count windows under a Poisson arrival process
 make test
 ```
 
-103 tests. The ones that matter:
+115 tests. The ones that matter:
 
 - `test_pit_leakage.py` — every expected value hand-computed from the fixture and stated in the test docstring. Checks against ground truth, not against last week's output.
 - `test_compatibility.py::test_coverage_is_never_gated_by_resolution` — enforces the contract that resolution rungs prune windows and sibling granularities but never remove a measure or an entity class.
 - `test_validate.py` — every check is proven to reject a specific known-bad spec, so the validator cannot pass everything and be mistaken for coverage.
+- `test_shard.py::test_every_card_is_self_contained` — each packet must restate the rules, not reference them, and `test_cards_do_not_defer_to_documents_not_in_the_packet` fails on any "see AGENT_BRIEF section 7". A reference is a rule that gets skipped.
+- `test_shard.py::test_worked_examples_pass_the_output_validator` — the examples are run through `validate_queue.py`. A wrong example would teach exactly the fabrication the validator exists to reject, so it is worse than no example.
 - `test_validate_queue.py` — two anchors, both required: a queue with planted defects is rejected item by item, *and* a large honest queue passes under `--strict` with zero warnings. A validator that rejects everything gets switched off, and then the fabrication it existed to catch ships anyway.
 - `test_discover.py::test_every_registry_id_is_reachable` — every entity, measure and family must be unlocked by some requirement, or the checklist can read as complete while part of the search stays unbuildable. It found two such holes on first run.
 - `test_discover.py::test_unverified_find_does_not_count` — a `found` that skipped its verify step must leave the entity blocked. The canonical case is a per-session cookie bound as a device fingerprint.

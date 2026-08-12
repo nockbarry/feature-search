@@ -243,6 +243,8 @@ Step 9 is not optional and is routinely skipped. Global importance is dominated 
 | `pit_aggregate_template.sql` | Reference implementation of the two-clock rule, shrinkage, censoring correction, and the parity harness. |
 | `DISCOVERY_CHECKLIST.md` | **Do this first.** What to look for in the company's data, what it is called there, how to verify a match. Generated from `spec/data_requirements.yaml`. |
 | `discover.py` | Renders the checklist; takes a filled binding and computes what is buildable. Stage 1 of the funnel depends on it. |
+| `shard.py` | `make shards` → 27 self-contained per-worker packets, ~3k tokens each. Stages 1-4 only; cross-shard stages stay with the coordinator. |
+| `validate_queue.py` | Checks a filled queue: that the evidence each row claims actually exists. `make accept QUEUE=...` |
 | `pack.py` | `make pack` → `pack/`, the model-facing subset with a read-order manifest. What you hand over. |
 | `validate.py` | Schema and invariant checks on the registries. `make catalog` runs it first, so a malformed spec fails loudly instead of expanding into a plausible catalog with a hole in it. |
 | `pit_reference.py` | The same logic in dependency-free Python — an executable spec CI can exercise. Also holds `naive_aggregate_LEAKY`, the bug kept deliberately so the suite can prove the correct path differs from it. |

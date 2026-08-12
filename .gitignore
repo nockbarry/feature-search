@@ -3,6 +3,7 @@
 candidates.csv
 feature_catalog.xlsx
 pack/
+shards/
 survivors.txt
 
 __pycache__/

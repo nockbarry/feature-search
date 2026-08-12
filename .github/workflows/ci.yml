@@ -83,6 +83,10 @@ jobs:
         run: |
           python pack.py --level L0
 
+      - name: Build worker shards
+        run: |
+          python shard.py
+
       - name: Upload catalog for review
         uses: actions/upload-artifact@v4
         with:
@@ -91,5 +95,6 @@ jobs:
             /tmp/L0.csv
             feature_catalog.xlsx
             pack/
+            shards/INDEX.md
           if-no-files-found: warn
           retention-days: 14
