@@ -7,7 +7,7 @@ LEVEL ?= L0
 PY    ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install catalog expand workbook test lint check clean all
+.PHONY: help install validate catalog expand workbook test lint check clean all
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -18,7 +18,10 @@ help:  ## Show this help
 install:  ## Install runtime + dev dependencies
 	$(PY) -m pip install -e ".[dev]"
 
-catalog:  ## Expand the YAML into candidates.csv at $(LEVEL)
+validate:  ## Schema + invariant checks on feature_space.yaml
+	$(PY) validate.py
+
+catalog: validate  ## Expand the YAML into candidates.csv at $(LEVEL)
 	$(PY) expand_catalog.py --level $(LEVEL)
 
 expand:  ## Stage B/C expansion on stage-4 survivors (needs survivors.txt)
@@ -34,7 +37,7 @@ test:  ## Run the test suite
 lint:  ## Static checks
 	$(PY) -m ruff check .
 
-check: test lint  ## Everything CI runs
+check: validate test lint  ## Everything CI runs
 	@echo "ok — determinism is asserted by tests/test_determinism.py"
 
 clean:  ## Remove build artifacts

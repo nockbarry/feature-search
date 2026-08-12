@@ -31,6 +31,7 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 |---|---|
 | `AGENT_BRIEF.md` | **Start here.** Mission, grammar, correctness rules, pruning funnel, definition of done. |
 | `feature_space.yaml` | Source of truth: six slot registries, resolution ladder, labels, typologies. **Edit this.** |
+| `validate.py` | Schema and invariant checks on the YAML. Runs before every expansion. |
 | `expand_catalog.py` | Expands the YAML into `candidates.csv`. Flags: `--level`, `--max-tier`, `--expand`, `--survivors`. |
 | `nongrid_features.py` | 143 hand-enumerated features the grammar cannot express. Expected to carry most of the lift. |
 | `build_workbook.py` | Generates `feature_catalog.xlsx` — the agent's work queue. |
@@ -39,7 +40,7 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 | `docs/split_protocol.md` | Embargo and purging under label maturity. |
 | `docs/null_semantics.md` | Null policy and feature-outage behaviour. |
 | `docs/label_definition.md` | Reason-code mapping and dispute-lifecycle edge cases. |
-| `tests/` | Compatibility rules, naming contract, determinism, and the leakage fixtures. |
+| `tests/` | Compatibility rules, naming contract, determinism, spec validation, and the leakage fixtures. |
 
 **`candidates.csv` and `feature_catalog.xlsx` are build artifacts.** They are gitignored and CI fails if either is committed. Edit the YAML and regenerate.
 
@@ -83,10 +84,11 @@ Why coarsening is safe: for nested count windows under a Poisson arrival process
 make test
 ```
 
-41 tests. The ones that matter:
+60 tests. The ones that matter:
 
 - `test_pit_leakage.py` — every expected value hand-computed from the fixture and stated in the test docstring. Checks against ground truth, not against last week's output.
 - `test_compatibility.py::test_coverage_is_never_gated_by_resolution` — enforces the contract that resolution rungs prune windows and sibling granularities but never remove a measure or an entity class.
+- `test_validate.py` — every check is proven to reject a specific known-bad spec, so the validator cannot pass everything and be mistaken for coverage.
 - `test_determinism.py` — regeneration must be byte-identical, or diffs become unreadable and the agent's fills can no longer be matched to their features.
 
 ---

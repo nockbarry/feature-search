@@ -241,6 +241,7 @@ Step 9 is not optional and is routinely skipped. Global importance is dominated 
 | `nongrid_features.py` | The 143 seeded non-grid features. Extend it. |
 | `build_workbook.py` | Regenerates `feature_catalog.xlsx` from the above. |
 | `pit_aggregate_template.sql` | Reference implementation of the two-clock rule, shrinkage, censoring correction, and the parity harness. |
+| `validate.py` | Schema and invariant checks on the registries. `make catalog` runs it first, so a malformed spec fails loudly instead of expanding into a plausible catalog with a hole in it. |
 | `pit_reference.py` | The same logic in dependency-free Python — an executable spec CI can exercise. Also holds `naive_aggregate_LEAKY`, the bug kept deliberately so the suite can prove the correct path differs from it. |
 | `feature_catalog.xlsx` | The work queue. Blue cells are yours to fill. **Build artifact** — gitignored, CI fails if committed. |
 | `docs/split_protocol.md` | Purge and embargo under label maturity. Read before cutting any split. |

@@ -11,7 +11,7 @@
 # =====================================================================
 
 meta:
-  label: chargeback_fraud          # primary label; see labels: below
+  label: cb_fraud                  # primary label; must match an id in labels: below
   decision_point: pre_authorization
   latency_budget_ms: 40            # p99 for the ENTIRE feature vector
   as_of_rule: label_arrival_ts     # aggregates filter on label arrival, not event time
@@ -116,15 +116,15 @@ composites:
 measures:
   # -- outcome (label-dependent) ------------------------------------
   - {id: cb_rate,        name: Chargeback rate,               family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
-  - {id: cb_fraud_rate,  name: CB rate, fraud reason group,   family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
-  - {id: cb_nonfr_rate,  name: CB rate, non-fraud reason grp, family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
+  - {id: cb_fraud_rate,  name: "CB rate, fraud reason group",   family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
+  - {id: cb_nonfr_rate,  name: "CB rate, non-fraud reason grp", family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
   - {id: cb_amt,         name: Chargeback dollars,            family: outcome,   label_dependent: true,  dtype: money,   priority: 1}
   - {id: tc40_rate,      name: TC40/SAFE alert rate,          family: outcome,   label_dependent: true,  dtype: rate,    priority: 1}
   - {id: den_rate,       name: DEN rate (downstream rules),   family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
   - {id: den_by_rule,    name: DEN rate by rule ID,           family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
   - {id: err_rate,       name: ERR rate (issuer decline),     family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
-  - {id: err_lost_stln,  name: ERR rate, lost/stolen code,    family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
-  - {id: err_dnh,        name: ERR rate, do-not-honor code,   family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
+  - {id: err_lost_stln,  name: "ERR rate, lost/stolen code",    family: outcome,   label_dependent: false, dtype: rate,    priority: 1}
+  - {id: err_dnh,        name: "ERR rate, do-not-honor code",   family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
   - {id: sen_rate,       name: SEN (settle) rate,             family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
   - {id: retry_success,  name: Approval-after-retry rate,     family: outcome,   label_dependent: false, dtype: rate,    priority: 2}
   - {id: refund_rate,    name: Refund rate,                   family: outcome,   label_dependent: true,  dtype: rate,    priority: 2}
