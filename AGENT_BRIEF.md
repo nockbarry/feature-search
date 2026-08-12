@@ -1,16 +1,34 @@
 # Feature Search — Agent Brief
-### Chargeback fraud classification · challenger model `dnn_v50_rc3`
+### A portable method for searching the feature space of a transaction-risk model
+
+> **This repo is a starting point, not a description of your system.**
+>
+> The method here — the grammar, the resolution ladder, the correctness rules, the
+> pruning funnel — is portable. The *numbers* are not. Model names, latency budget,
+> label maturity, funnel state names, base rates and block rates all vary per
+> deployment, and each one determines downstream correctness.
+>
+> They live in **`spec/instance.yaml`**, and every one ships as `TODO`. Where this
+> document shows a value it is labelled **EXAMPLE** and comes from a
+> remittance-style card portfolio. Adopting an example silently means the search
+> completes, looks reasonable, and describes a system nobody operates.
+>
+> `python validate_instance.py` fails while any `TODO` remains. Run it first.
+> Read `INTEGRATION.md` for the order of operations.
 
 ---
 
 ## 1. Mission
 
-Search the reachable feature space for a chargeback-fraud model exhaustively, screen it down to a shippable set, and prove that every survivor is correct, servable, and durable.
+Search the reachable feature space for a transaction-risk model exhaustively, screen it down to a shippable set, and prove that every survivor is correct, servable, and durable.
+
+The worked instance throughout is **chargeback fraud on card/remittance traffic**, because a concrete example is clearer than an abstract one. The method applies to any binary outcome with delayed, censored labels — dispute, default, abuse, ATO — and the parts that change are exactly the parts in `spec/instance.yaml`.
 
 You are **not** being asked to build a model. You are being asked to produce a defensible, audited feature set plus the evidence that it is free of leakage and computable at decision time.
 
 **Deliverables, in order:**
 
+0. A filled `spec/instance.yaml` and a filled binding, before any screening. Nothing below is meaningful until these exist.
 1. The work queue fully populated — every candidate has a terminal status, every drop has a reason. Working from a context pack, that is `queue.csv`; working in the repo, `feature_catalog.xlsx`. Same rows, same fill-in columns.
 2. Built feature implementations for all survivors, in the serving path's own code.
 3. A leakage audit signed off per the workbook's Leakage Audit sheet.
@@ -20,22 +38,30 @@ You are **not** being asked to build a model. You are being asked to produce a d
 
 ---
 
-## 2. Context you need
+## 2. Context you must establish — every value here comes from `spec/instance.yaml`
 
-**The model.** A challenger to production champion `gbm_v412`, scoring pre-authorization, deciding block vs pass. Champion currently blocks ~4.2% of dollar volume.
+Do not read past this section until the file is filled. Each row below names what the value *decides*, which is why inheriting the example is not a shortcut but a silent error.
 
-**The funnel.** A passed transaction reaches one of: `SEN` (settled), `DEN` (denied by downstream rules), `ERR` (errored/declined at the financial institution). Only `SEN` can charge back (`CB`).
+| `instance.yaml` | What it decides | EXAMPLE (not yours) |
+|---|---|---|
+| `model.champion_name`, `champion_block_rate_pct` | How much of entity history is observable at all | incumbent blocks 4.2% of dollar volume |
+| `model.release_rate_pct` | Whether censoring can be corrected by any method | 0.5% |
+| `model.decision_point` | Which inputs exist at scoring time | pre-authorization |
+| `serving.latency_budget_ms`, `serving.supported` | Stage 1 of the funnel — what is reachable | p99 40 ms for the whole vector |
+| `funnel.states`, `outcome_eligible` | Outcome denominators, so every rate feature | `SEN`/`DEN`/`ERR`; only `SEN` disputes |
+| `maturity.days_to_90pct` | Purge and embargo widths in the split protocol | 30 days |
+| `volume.positive_rate_bps`, `min_support_n` | Support floors and whether a screen can resolve | 20 bps, n≥30 |
+| `governance.prohibited_fields` | Which fields you may build on at all | — |
 
-**Label maturity.** CBs in this segment reach ~90% of ultimate volume by day 30. That means: any aggregate over a window ending within ~45 days of today is under-counting, and any *feature* built from recent labels needs the same emergence-adjustment discipline as the model evaluation does.
-
-**The censoring problem, which shapes everything.** Champion-blocked transactions have no outcome. Entity outcome rates are therefore computable only over traffic the champion approved. An entity that the champion blocks heavily looks clean. This means:
+**The censoring problem, which shapes everything, and does not vary.** Blocked transactions have no outcome. Entity outcome rates are therefore computable only over traffic the incumbent approved, so an entity it blocks heavily looks clean. This means:
 - Every outcome-rate feature partially encodes *current policy*, not just risk.
-- Features derived from entity history are the ones most distorted by the champion's blind spots.
-- **Use the release-program labels** (champion-blocked transactions sampled and released, carrying `sample_weight`) to de-bias entity rates in the blocked region. Without this the challenger relearns the champion's blind spots and the feature set has a ceiling it cannot see.
+- Features derived from entity history are the ones most distorted by the incumbent's blind spots.
+- **Use release-program labels** (blocked transactions sampled and released, carrying `sample_weight`) to de-bias entity rates in the blocked region. Without this the challenger relearns the incumbent's blind spots and the feature set has a ceiling it cannot see.
+- If `model.release_rate_pct` is 0, that correction is unavailable and the ceiling is real. Record it as a stated limit on the search rather than discovering it later.
 
-**Latency budget.** p99 of **40 ms** for the entire feature vector, not per feature.
+**Decision point.** Whatever `model.decision_point` says. Anything whose input arrives *after* that moment (delivery confirmation, refund outcome, dispute flag) is a later-lifecycle feature and must be tagged as such, not silently included. This is the single most common way a strong-looking backtest turns out to be unservable.
 
-**Decision point.** Pre-authorization. Anything whose input arrives after the authorization decision (delivery confirmation, refund outcome, dispute flag) is a later-lifecycle feature and must be tagged as such, not silently included.
+**Label maturity.** Measure it; do not inherit it. For transactions N days old, what fraction of their eventual outcomes have arrived? Any aggregate over a window ending within one maturity horizon of today is under-counting, and any feature built from recent labels needs the same emergence-adjustment discipline as the model evaluation. See `docs/split_protocol.md`, which derives its widths from `maturity`.
 
 ---
 

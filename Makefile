@@ -8,7 +8,8 @@ SHARD_BY ?= entity_id
 PY       ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install validate checklist catalog expand workbook pack shards accept test lint check clean all
+
+.PHONY: help install instance validate checklist survey catalog expand workbook pack shards accept test lint check clean all
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -19,8 +20,15 @@ help:  ## Show this help
 install:  ## Install runtime + dev dependencies
 	$(PY) -m pip install -e ".[dev]"
 
+instance:  ## Check spec/instance.yaml is filled in and internally consistent
+	$(PY) validate_instance.py
+
 validate:  ## Schema + invariant checks on feature_space.yaml
 	$(PY) validate.py
+	$(PY) validate_instance.py --allow-todo
+
+survey:  ## Generate the BigQuery discovery survey from your instance
+	$(PY) bqsurvey.py
 
 checklist:  ## Regenerate DISCOVERY_CHECKLIST.md from spec/data_requirements.yaml
 	$(PY) discover.py --checklist

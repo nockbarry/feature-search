@@ -1,0 +1,136 @@
+# =====================================================================
+# instance.yaml — THE ONE FILE YOU MUST FILL IN.
+#
+# Everything else in this repo is portable method. This file is the only
+# place that describes YOUR environment, and nothing downstream is correct
+# until it is filled.
+#
+# The values shipped here are marked TODO and carry EXAMPLE values from a
+# remittance-style card portfolio, kept only so the shape is unambiguous.
+# They are NOT facts about your system. An agent that reads "40 ms" or
+# "30 days" and proceeds has adopted someone else's environment: the embargo
+# width, the support floors, the maturity horizon and half the availability
+# decisions all derive from these numbers.
+#
+#   python validate_instance.py        # refuses to pass while TODOs remain
+#
+# Replace every `TODO` with a measured value or an explicit `unknown`.
+# `unknown` is a legitimate answer that blocks the dependent work honestly;
+# leaving the EXAMPLE in place is not.
+# =====================================================================
+
+version: 1
+
+# ---------------------------------------------------------------------
+# 1. WHAT YOU ARE BUILDING
+# ---------------------------------------------------------------------
+model:
+  name: TODO                        # EXAMPLE: dnn_v50_rc3
+  champion_name: TODO               # EXAMPLE: gbm_v412 — the incumbent, or `none`
+  decision_point: TODO              # pre_authorization | post_authorization | periodic_review
+  decision: TODO                    # EXAMPLE: block | pass
+  # Everything the champion blocks has no outcome. This rate bounds how much
+  # of the entity-history space is observable at all — see the censoring
+  # discussion in AGENT_BRIEF section 2.
+  champion_block_rate_pct: TODO     # EXAMPLE: 4.2  (of dollar volume)
+  # If there is no release program, entity outcome rates cannot be de-biased
+  # in the blocked region by any method. Record `0` honestly if so.
+  release_rate_pct: TODO            # EXAMPLE: 0.5
+
+# ---------------------------------------------------------------------
+# 2. LATENCY — decides which features are reachable at all
+# ---------------------------------------------------------------------
+serving:
+  latency_budget_ms: TODO           # EXAMPLE: 40 — p99 for the ENTIRE feature vector
+  budget_is_per: vector             # vector | feature — nearly always `vector`
+  # Which computation classes you can actually serve inside that budget.
+  # Anything absent here makes every feature depending on it unbuildable,
+  # regardless of how predictive it is.
+  supported:
+    realtime_lookup: TODO           # EXAMPLE: true
+    streaming_aggregate: TODO       # EXAMPLE: true  — needs a sketch/state store
+    vendor_enrichment_inline: TODO  # EXAMPLE: false — adds a network hop
+    graph_traversal_1hop: TODO      # EXAMPLE: false
+    batch_precompute: TODO          # EXAMPLE: true  — refreshed daily, stale by design
+
+# ---------------------------------------------------------------------
+# 3. THE FUNNEL — your own state names, not ours
+# ---------------------------------------------------------------------
+# The method assumes only that SOME states can produce the outcome you are
+# predicting and others cannot. Map your states onto that.
+funnel:
+  states: TODO                      # EXAMPLE: [SEN, DEN, ERR]
+  outcome_eligible: TODO            # EXAMPLE: [SEN] — only settled can charge back
+  notes: TODO                       # EXAMPLE: 2 pending states excluded from denominators
+
+# ---------------------------------------------------------------------
+# 4. LABEL MATURITY — sets the embargo, and is measured, not assumed
+# ---------------------------------------------------------------------
+# Measure this from your own dispute history: for transactions N days old,
+# what fraction of their eventual disputes have arrived? Do not inherit a
+# number. docs/split_protocol.md derives the purge and embargo widths from
+# these values, so a wrong number here silently corrupts every split.
+maturity:
+  primary_label: TODO               # EXAMPLE: cb_fraud
+  days_to_90pct: TODO               # EXAMPLE: 30
+  days_to_99pct: TODO               # EXAMPLE: 90
+  # Embargo must be at least max(maturity horizon, longest feature window).
+  longest_feature_window_days: TODO # EXAMPLE: 90 — from the windows registry
+  measured_on: TODO                 # EXAMPLE: 2024-01 to 2025-06 dispute cohorts
+  # Different label feeds mature at different rates; override per label here.
+  per_label_days_to_90pct: TODO     # EXAMPLE: {cb_fraud: 30, cb_nonfraud: 55, tc40_safe: 7}
+
+# ---------------------------------------------------------------------
+# 5. BASE RATES — decide support floors and whether a screen can resolve
+# ---------------------------------------------------------------------
+volume:
+  txn_per_day: TODO                 # EXAMPLE: 1_200_000
+  positive_rate_bps: TODO           # EXAMPLE: 20  — ~0.2%
+  history_available_months: TODO    # EXAMPLE: 24 — caps your longest window and PSI baseline
+  # At this positive rate, a cell needs roughly this many observations before
+  # its rate is distinguishable from the parent. Used as min_support default.
+  min_support_n: TODO               # EXAMPLE: 30
+
+# ---------------------------------------------------------------------
+# 6. WAREHOUSE — where the agent goes looking
+# ---------------------------------------------------------------------
+warehouse:
+  kind: TODO                        # EXAMPLE: bigquery
+  project: TODO                     # EXAMPLE: acme-risk-prod
+  # Datasets to survey, best guess first. The agent expands from here; these
+  # are starting points, not an exhaustive list.
+  datasets: TODO                    # EXAMPLE: [payments, risk, core, web_analytics]
+  # Tables you already believe matter. Saves the agent a discovery round.
+  known_tables: TODO                # EXAMPLE: [payments.authorization, risk.dispute]
+  location: TODO                    # EXAMPLE: US — INFORMATION_SCHEMA is region-qualified
+  # Rough ceiling per exploratory query, so the agent samples instead of
+  # scanning a year of a partitioned fact table by accident.
+  max_scan_gb_per_query: TODO       # EXAMPLE: 50
+
+# ---------------------------------------------------------------------
+# 7. FIELD-FITNESS THRESHOLDS — what "good enough to build on" means here
+# ---------------------------------------------------------------------
+# A field can exist, join, and still be unusable. These are the bars a
+# candidate column must clear before it is bound. Defaults are deliberately
+# conservative; loosen them with evidence, not convenience.
+fitness:
+  max_null_rate_pct: 5.0            # above this, the field is a partial field
+  min_coverage_months: 12           # need a full seasonal cycle for PSI
+  max_monthly_coverage_swing_pct: 20.0   # a coverage cliff means a schema or vendor change
+  max_psi_vs_baseline: 0.25         # above this the field is not stable enough to train on
+  # An id whose distinct count tracks session count is a session cookie, not
+  # a stable entity key. This is the check that catches the most damaging
+  # mis-bind in the whole process.
+  max_entity_to_session_ratio: 0.80
+  min_join_rate_pct: 90.0           # enrichment tables that miss 20% of traffic are not features
+
+# ---------------------------------------------------------------------
+# 8. GOVERNANCE — constrains which fields you may use at all
+# ---------------------------------------------------------------------
+governance:
+  # Fields you may NOT build on regardless of lift. Name-, DOB- and
+  # geography-derived features carry disparate-impact exposure.
+  prohibited_fields: TODO           # EXAMPLE: [] — or [natid, dob, birth_country]
+  requires_signoff: TODO            # EXAMPLE: [name_norm, dob_surname, postcode]
+  adverse_action_required: TODO     # EXAMPLE: false — if true, features must be explainable
+  data_residency: TODO              # EXAMPLE: none

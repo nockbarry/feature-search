@@ -18,7 +18,7 @@ build-backend = "setuptools.build_meta"
 # Flat layout with several top-level modules: setuptools auto-discovery refuses
 # to guess, so name them. Adding a new top-level module means adding it here.
 [tool.setuptools]
-py-modules = ["expand_catalog", "nongrid_features", "build_workbook", "pit_reference", "validate", "validate_queue", "pack", "discover", "shard"]
+py-modules = ["expand_catalog", "nongrid_features", "build_workbook", "pit_reference", "validate", "validate_queue", "validate_instance", "pack", "discover", "shard", "bqsurvey"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

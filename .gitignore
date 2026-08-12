@@ -4,6 +4,7 @@ candidates.csv
 feature_catalog.xlsx
 pack/
 shards/
+sql/survey/
 survivors.txt
 
 __pycache__/

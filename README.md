@@ -2,6 +2,11 @@
 
 Generative feature-space search for a **chargeback fraud classification model**.
 
+**A starting point, not a description of any one system.** The method is portable;
+every environment-specific value lives in `spec/instance.yaml` and ships as `TODO`.
+Read **[INTEGRATION.md](INTEGRATION.md)** first — it is the map of what you provide
+and in what order.
+
 Enumerates the reachable feature space from a slot grammar, screens it down to a shippable set, and enforces the correctness properties — point-in-time labels, serving parity, support floors — that decide whether a feature is real or an artifact of hindsight.
 
 Built for a pre-authorization block/pass decision over a `SEN` / `DEN` / `ERR` / `CB` funnel, where chargebacks reach ~90% maturity at 30 days.
@@ -12,6 +17,8 @@ Built for a pre-authorization block/pass decision over a `SEN` / `DEN` / `ERR` /
 
 ```bash
 make install          # runtime + dev deps
+make instance         # is spec/instance.yaml filled in? (fails on TODOs)
+make survey           # runnable BigQuery discovery for your project
 make checklist        # DISCOVERY_CHECKLIST.md — what to find in your warehouse
 make pack             # pack/ — the model-facing context pack
 make workbook         # feature_catalog.xlsx — the human fill-in surface
@@ -33,6 +40,10 @@ make expand  LEVEL=L1     # stage B/C, needs survivors.txt from the screen
 |---|---|
 | `AGENT_BRIEF.md` | **Start here.** Mission, grammar, correctness rules, pruning funnel, definition of done. |
 | `feature_space.yaml` | Source of truth: six slot registries, resolution ladder, labels, typologies. **Edit this.** |
+| **`INTEGRATION.md`** | **Read first.** What you provide, in what order, how to integrate with an agent system. |
+| `spec/instance.yaml` | **Your environment.** Ships all `TODO`. Latency, maturity, funnel, base rates, warehouse, governance. |
+| `validate_instance.py` | Refuses to pass while a `TODO` remains — the guard against inheriting someone else's numbers. |
+| `bqsurvey.py` | Generates runnable BigQuery: column search across ~324 aliases, then profiling for nulls, stability and entity-key sanity. |
 | `spec/data_requirements.yaml` | **What to look for inside the company.** 42 requirements: aliases to search the catalog for, how to verify a match, what breaks without it. |
 | `discover.py` | Renders the checklist; takes a filled binding and reports which entities, measures and families it unlocks. |
 | `validate.py` | Schema and invariant checks on the YAML. Runs before every expansion. |
@@ -159,11 +170,13 @@ Why coarsening is safe: for nested count windows under a Poisson arrival process
 make test
 ```
 
-115 tests. The ones that matter:
+129 tests. The ones that matter:
 
 - `test_pit_leakage.py` — every expected value hand-computed from the fixture and stated in the test docstring. Checks against ground truth, not against last week's output.
 - `test_compatibility.py::test_coverage_is_never_gated_by_resolution` — enforces the contract that resolution rungs prune windows and sibling granularities but never remove a measure or an entity class.
 - `test_validate.py` — every check is proven to reject a specific known-bad spec, so the validator cannot pass everything and be mistaken for coverage.
+- `test_instance.py::test_shipped_instance_is_all_todo` — the template must ship unfilled. A shipped value is a value someone inherits.
+- `test_instance.py::test_brief_does_not_state_instance_values_as_fact` — the prose may not quietly restate instance values in its own voice.
 - `test_shard.py::test_every_card_is_self_contained` — each packet must restate the rules, not reference them, and `test_cards_do_not_defer_to_documents_not_in_the_packet` fails on any "see AGENT_BRIEF section 7". A reference is a rule that gets skipped.
 - `test_shard.py::test_worked_examples_pass_the_output_validator` — the examples are run through `validate_queue.py`. A wrong example would teach exactly the fabrication the validator exists to reject, so it is worse than no example.
 - `test_validate_queue.py` — two anchors, both required: a queue with planted defects is rejected item by item, *and* a large honest queue passes under `--strict` with zero warnings. A validator that rejects everything gets switched off, and then the fabrication it existed to catch ships anyway.

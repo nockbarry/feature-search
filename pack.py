@@ -56,6 +56,10 @@ SPEC_FILES = [
 # The discovery step comes BEFORE the search: nothing in the queue is screenable
 # until the inputs are bound to real columns. These ship with the pack.
 DISCOVERY_FILES = [
+    ("INTEGRATION.md", "READ FIRST. What you must provide, in what order, and how to plug this into an agent system."),
+    ("spec/instance.yaml", "YOUR ENVIRONMENT — every value ships as TODO. Nothing downstream is correct until this is filled."),
+    ("validate_instance.py", "Refuses to pass while a TODO remains. Run it before anything else."),
+    ("bqsurvey.py", "`python bqsurvey.py` -> runnable BigQuery: find candidate columns, then profile them for nulls, stability and entity-key sanity."),
     ("DISCOVERY_CHECKLIST.md", "START HERE. What to look for in the company's data, what it is called, how to verify a match."),
     ("spec/data_requirements.yaml", "The machine-readable source of the checklist. Feeds the coverage report."),
     ("spec/binding.example.yaml", "A worked, deliberately incomplete binding. Copy the shape, not the values."),
@@ -135,7 +139,7 @@ def manifest(level, rows, sizes, constants, statuses):
         "",
     ]
     n = 1
-    for group, files in (("Discovery — do this first", DISCOVERY_FILES),
+    for group, files in (("Start here — establish your environment", DISCOVERY_FILES),
                          ("Specification", SPEC_FILES),
                          ("Correctness", CORRECTNESS_FILES)):
         lines.append(f"**{group}**")
@@ -214,7 +218,16 @@ def manifest(level, rows, sizes, constants, statuses):
         "and guard this pack; they are not inputs to the search. `feature_catalog.xlsx` is",
         "the human fill-in surface — use `queue.csv` instead.",
         "",
-        "## Before you screen anything: bind the inputs",
+        "## This repo describes no environment, including yours",
+        "",
+        "Every environment-specific value — latency budget, label maturity, funnel state",
+        "names, base rates, warehouse coordinates — lives in `spec/instance.yaml` and ships",
+        "as `TODO`. Any number you see in the brief is labelled EXAMPLE and belongs to a",
+        "different portfolio. Run `python validate_instance.py`; it fails while TODOs",
+        "remain. Adopting an example does not error — it produces a search that completes,",
+        "looks reasonable, and describes a system nobody operates.",
+        "",
+        "## Then bind the inputs",
         "",
         "No schema binding exists yet. The SQL template names `txn`, `chargeback`,",
         "`release_log`, `approved_traffic`, `v_label_arrival`, `v_parent_rate_pit`,",
@@ -227,6 +240,8 @@ def manifest(level, rows, sizes, constants, statuses):
         "from a lookalike. Then:",
         "",
         "```bash",
+        "python validate_instance.py                    # fill spec/instance.yaml first",
+        "python bqsurvey.py && ls sql/survey/            # runnable BigQuery discovery",
         "python discover.py --template > binding.yaml   # skeleton",
         "# ... fill it in as you search ...",
         "python discover.py --binding binding.yaml      # what your findings unlock",

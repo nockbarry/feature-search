@@ -25,7 +25,9 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Validate spec
-        run: python validate.py
+        run: |
+          python validate.py
+          python validate_instance.py --allow-todo
 
       - name: Discovery checklist is current
         run: |
@@ -86,6 +88,10 @@ jobs:
       - name: Build worker shards
         run: |
           python shard.py
+
+      - name: Generate BigQuery survey
+        run: |
+          python bqsurvey.py
 
       - name: Upload catalog for review
         uses: actions/upload-artifact@v4
